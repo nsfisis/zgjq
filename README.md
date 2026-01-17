@@ -2,6 +2,8 @@
 
 Zig implementation of [jq](https://jqlang.org/).
 
+![Logo](./assets/logo_仮.png)
+
 
 ## Build
 
