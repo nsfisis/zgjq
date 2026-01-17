@@ -5,7 +5,8 @@ pub const jv = @import("./jv.zig");
 pub fn run(allocator: std.mem.Allocator, input: []const u8, query: []const u8) ![]const u8 {
     var compile_allocator = std.heap.ArenaAllocator.init(allocator);
     defer compile_allocator.deinit();
-    const tokens = try jq.tokenize(compile_allocator.allocator(), query);
+    var reader = std.Io.Reader.fixed(query);
+    const tokens = try jq.tokenize(compile_allocator.allocator(), &reader);
     const ast = try jq.parse(compile_allocator.allocator(), tokens);
     const instrs = try jq.compile(allocator, compile_allocator.allocator(), ast);
     defer allocator.free(instrs);

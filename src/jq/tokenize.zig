@@ -25,18 +25,14 @@ pub const Token = union(TokenKind) {
     }
 };
 
-pub fn tokenize(allocator: std.mem.Allocator, query: []const u8) ![]Token {
+pub fn tokenize(allocator: std.mem.Allocator, reader: *std.Io.Reader) ![]Token {
     var tokens = try std.array_list.Aligned(Token, null).initCapacity(allocator, 16);
 
-    const len = query.len;
-
-    if (len == 0) {
-        return error.UnexpectedEnd;
-    }
-
-    var i: usize = 0;
-    while (i < len) {
-        const c = query[i];
+    while (true) {
+        const c = reader.takeByte() catch |err| switch (err) {
+            error.EndOfStream => break,
+            error.ReadFailed => return error.ReadFailed,
+        };
         switch (c) {
             '.' => try tokens.append(allocator, .dot),
             '[' => try tokens.append(allocator, .bracket_left),
@@ -49,7 +45,10 @@ pub fn tokenize(allocator: std.mem.Allocator, query: []const u8) ![]Token {
                 }
             },
         }
-        i += 1;
+    }
+
+    if (tokens.items.len == 0) {
+        return error.UnexpectedEnd;
     }
 
     try tokens.append(allocator, .end);
