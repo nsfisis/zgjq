@@ -10,12 +10,14 @@ pub const ParseError = error{
 pub const AstKind = enum {
     identity,
     array_index,
+    object_key,
     literal,
 };
 
 pub const Ast = union(AstKind) {
     identity,
     array_index: *Ast,
+    object_key: []const u8,
     literal: *jv.Value,
 
     pub fn kind(self: @This()) AstKind {
@@ -39,6 +41,19 @@ pub fn parse(allocator: std.mem.Allocator, tokens: []const Token) !*Ast {
     if (t2.kind() == .end) {
         const root = try allocator.create(Ast);
         root.* = .identity;
+        return root;
+    }
+
+    if (t2.kind() == .identifier) {
+        i += 1;
+        const t3 = tokens[i];
+        if (t3.kind() != .end) {
+            return error.InvalidQuery;
+        }
+        const root = try allocator.create(Ast);
+        root.* = .{
+            .object_key = t2.identifier,
+        };
         return root;
     }
 

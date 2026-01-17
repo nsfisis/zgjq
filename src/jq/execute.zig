@@ -66,6 +66,14 @@ const ValueStack = struct {
             else => error.InvalidType,
         };
     }
+
+    pub fn popObject(self: *Self) ExecuteError!jv.Object {
+        const value = try self.pop();
+        return switch (value) {
+            .object => |o| o,
+            else => error.InvalidType,
+        };
+    }
 };
 
 pub fn execute(allocator: std.mem.Allocator, instrs: []const Instr, input: jv.Value) !jv.Value {
@@ -84,6 +92,11 @@ pub fn execute(allocator: std.mem.Allocator, instrs: []const Instr, input: jv.Va
                 const index: usize = @intCast(try value_stack.popInteger());
                 const array = try value_stack.popArray();
                 const result = if (index < array.items.len) array.items[index] else .null;
+                try value_stack.push(result);
+            },
+            .object_key => |key| {
+                const obj = try value_stack.popObject();
+                const result = obj.get(key) orelse .null;
                 try value_stack.push(result);
             },
             .literal => |value| {

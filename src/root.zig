@@ -58,3 +58,15 @@ test "array index filter" {
         \\ 81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100]
     , ".[100]");
 }
+
+test "object key filter" {
+    var debug_allocator = std.heap.DebugAllocator(.{}).init;
+    defer std.debug.assert(debug_allocator.deinit() == .ok);
+    const allocator = debug_allocator.allocator();
+
+    try testRun("123", allocator, "{\"a\":123}", ".a");
+    try testRun("null", allocator, "{\"a\":123}", ".b");
+    try testRun("\"hello\"", allocator, "{\"foo\":\"hello\"}", ".foo");
+    try testRun("[1,2,3]", allocator, "{\"arr\":[1,2,3]}", ".arr");
+    try testRun("{\"bar\":true}", allocator, "{\"foo\":{\"bar\":true}}", ".foo");
+}

@@ -5,12 +5,14 @@ const Ast = @import("./parse.zig").Ast;
 pub const Opcode = enum {
     nop,
     array_index,
+    object_key,
     literal,
 };
 
 pub const Instr = union(Opcode) {
     nop,
     array_index,
+    object_key: []const u8,
     literal: *jv.Value,
 
     pub fn op(self: @This()) Opcode {
@@ -29,6 +31,7 @@ pub fn compile(allocator: std.mem.Allocator, compile_allocator: std.mem.Allocato
             try instrs.appendSlice(allocator, index_instrs);
             try instrs.append(allocator, .array_index);
         },
+        .object_key => |key| try instrs.append(allocator, .{ .object_key = key }),
         .literal => |value| try instrs.append(allocator, .{ .literal = value }),
     }
 
