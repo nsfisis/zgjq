@@ -5,7 +5,7 @@ build: fmt
     @zig build
 
 test: fmt
-    @zig test src/root.zig
+    @zig build test
 
 fmt:
     @zig fmt .

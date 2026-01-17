@@ -13,6 +13,11 @@ pub const AstKind = enum {
     array_index,
     object_key,
     literal,
+    binary_expr,
+};
+
+pub const BinaryOp = enum {
+    add,
 };
 
 pub const Ast = union(AstKind) {
@@ -20,6 +25,7 @@ pub const Ast = union(AstKind) {
     array_index: *Ast,
     object_key: []const u8,
     literal: *jv.Value,
+    binary_expr: struct { op: BinaryOp, lhs: *Ast, rhs: *Ast },
 
     pub fn kind(self: @This()) AstKind {
         return self;
@@ -70,42 +76,66 @@ pub fn parse(allocator: std.mem.Allocator, tokens: []const Token) !*Ast {
 }
 
 // GRAMMAR
-//   query := filter
+//   query := expr
 fn parseQuery(allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
-    const result = try parseFilter(allocator, tokens);
+    const result = try parseExpr(allocator, tokens);
     _ = try tokens.expect(.end);
     return result;
 }
 
 // GRAMMAR
-//   filter := "." accessor?
-fn parseFilter(allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
-    _ = try tokens.expect(.dot);
-
-    const next_token = try tokens.peek();
-
-    if (next_token.kind() == .end) {
+//   expr := term
+//         | term + term
+fn parseExpr(allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
+    var lhs = try parseTerm(allocator, tokens);
+    const token = try tokens.peek();
+    if (token.kind() == .plus) {
+        _ = try tokens.next();
+        const rhs = try parseTerm(allocator, tokens);
         const ast = try allocator.create(Ast);
-        ast.* = .identity;
-        return ast;
+        ast.* = .{ .binary_expr = .{
+            .op = .add,
+            .lhs = lhs,
+            .rhs = rhs,
+        } };
+        lhs = ast;
     }
-
-    return parseAccessor(allocator, tokens);
+    return lhs;
 }
 
 // GRAMMAR
-//   accessor := field_access | index_access
-fn parseAccessor(allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
-    const token = try tokens.peek();
-
-    if (token.kind() == .identifier) {
-        return parseFieldAccess(allocator, tokens);
+//   term := "."
+//         | "." field_access
+//         | "." index_access
+//         | NUMBER
+fn parseTerm(allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
+    const first_token = try tokens.peek();
+    if (first_token.kind() == .number) {
+        _ = try tokens.next();
+        const number_value = try allocator.create(jv.Value);
+        number_value.* = .{ .integer = first_token.number };
+        const number_node = try allocator.create(Ast);
+        number_node.* = .{ .literal = number_value };
+        return number_node;
     }
-    if (token.kind() == .bracket_left) {
-        return parseIndexAccess(allocator, tokens);
-    }
 
-    return error.InvalidQuery;
+    _ = try tokens.expect(.dot);
+
+    const next_token = try tokens.peek();
+    switch (next_token.kind()) {
+        .end => {
+            const ast = try allocator.create(Ast);
+            ast.* = .identity;
+            return ast;
+        },
+        .identifier => {
+            return parseFieldAccess(allocator, tokens);
+        },
+        .bracket_left => {
+            return parseIndexAccess(allocator, tokens);
+        },
+        else => return error.InvalidQuery,
+    }
 }
 
 // GRAMMAR

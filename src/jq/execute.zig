@@ -74,6 +74,18 @@ const ValueStack = struct {
             else => error.InvalidType,
         };
     }
+
+    pub fn dup(self: *Self) !void {
+        const top = self.stack.items[self.stack.items.len - 1];
+        try self.push(top);
+    }
+
+    pub fn swap(self: *Self) void {
+        const len = self.stack.items.len;
+        const tmp = self.stack.items[len - 1];
+        self.stack.items[len - 1] = self.stack.items[len - 2];
+        self.stack.items[len - 2] = tmp;
+    }
 };
 
 pub fn execute(allocator: std.mem.Allocator, instrs: []const Instr, input: jv.Value) !jv.Value {
@@ -89,17 +101,27 @@ pub fn execute(allocator: std.mem.Allocator, instrs: []const Instr, input: jv.Va
         switch (cur) {
             .nop => {},
             .array_index => {
-                const index: usize = @intCast(try value_stack.popInteger());
                 const array = try value_stack.popArray();
+                const index: usize = @intCast(try value_stack.popInteger());
                 const result = if (index < array.items.len) array.items[index] else .null;
                 try value_stack.push(result);
             },
+            .add => {
+                _ = try value_stack.pop();
+                const lhs = try value_stack.popInteger();
+                const rhs = try value_stack.popInteger();
+                const result = lhs + rhs;
+                try value_stack.push(.{ .integer = result });
+            },
+            .subexp_begin => try value_stack.dup(),
+            .subexp_end => value_stack.swap(),
             .object_key => |key| {
                 const obj = try value_stack.popObject();
                 const result = obj.get(key) orelse .null;
                 try value_stack.push(result);
             },
             .literal => |value| {
+                _ = try value_stack.pop();
                 try value_stack.push(value.*);
             },
         }

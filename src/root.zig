@@ -70,3 +70,13 @@ test "object key filter" {
     try testRun("[1,2,3]", allocator, "{\"arr\":[1,2,3]}", ".arr");
     try testRun("{\"bar\":true}", allocator, "{\"foo\":{\"bar\":true}}", ".foo");
 }
+
+test "addition" {
+    var debug_allocator = std.heap.DebugAllocator(.{}).init;
+    defer std.debug.assert(debug_allocator.deinit() == .ok);
+    const allocator = debug_allocator.allocator();
+
+    try testRun("579", allocator, "null", "123 + 456");
+    try testRun("35", allocator, "{\"a\":12,\"b\":23}", ".a + .b");
+    try testRun("12", allocator, "[1,2,3]", ".[1] + 10");
+}
