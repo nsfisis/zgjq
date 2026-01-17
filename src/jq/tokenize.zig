@@ -120,7 +120,7 @@ fn isIdentifierContinue(c: u8) bool {
 }
 
 fn tokenizeIdentifier(allocator: std.mem.Allocator, reader: *std.Io.Reader, first: u8) ![]const u8 {
-    var buffer = try std.array_list.Aligned(u8, null).initCapacity(allocator, 16);
+    var buffer = try std.ArrayList(u8).initCapacity(allocator, 16);
     try buffer.append(allocator, first);
 
     while (true) {
@@ -169,7 +169,7 @@ fn tokenizeNumber(reader: *std.Io.Reader, first: u8) error{ReadFailed}!i64 {
 }
 
 pub fn tokenize(allocator: std.mem.Allocator, reader: *std.Io.Reader) ![]Token {
-    var tokens = try std.array_list.Aligned(Token, null).initCapacity(allocator, 16);
+    var tokens = try std.ArrayList(Token).initCapacity(allocator, 16);
 
     while (true) {
         const c = reader.takeByte() catch |err| switch (err) {

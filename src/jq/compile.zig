@@ -19,7 +19,7 @@ pub const Instr = union(Opcode) {
 };
 
 pub fn compile(allocator: std.mem.Allocator, compile_allocator: std.mem.Allocator, ast: *const Ast) ![]Instr {
-    var instrs = try std.array_list.Aligned(Instr, null).initCapacity(allocator, 16);
+    var instrs = try std.ArrayList(Instr).initCapacity(allocator, 16);
 
     switch (ast.*) {
         .identity => try instrs.append(allocator, .nop),

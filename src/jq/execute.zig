@@ -8,11 +8,71 @@ pub const ExecuteError = error{
     InternalError,
 };
 
-pub fn execute(allocator: std.mem.Allocator, instrs: []const Instr, input: jv.Value) !jv.Value {
-    var value_stack = try std.array_list.Aligned(jv.Value, null).initCapacity(allocator, 16);
-    defer value_stack.deinit(allocator);
+const ValueStack = struct {
+    const Self = @This();
+    const Stack = std.ArrayList(jv.Value);
 
-    try value_stack.append(allocator, input);
+    stack: Stack,
+    allocator: std.mem.Allocator,
+
+    pub fn init(allocator: std.mem.Allocator) !Self {
+        return .{
+            .stack = try Stack.initCapacity(allocator, 16),
+            .allocator = allocator,
+        };
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.stack.deinit(self.allocator);
+    }
+
+    pub fn push(self: *Self, value: jv.Value) !void {
+        try self.stack.append(self.allocator, value);
+    }
+
+    pub fn pop(self: *Self) ExecuteError!jv.Value {
+        return self.stack.pop() orelse return error.InternalError;
+    }
+
+    pub fn popInteger(self: *Self) ExecuteError!i64 {
+        const value = try self.pop();
+        return switch (value) {
+            .integer => |i| i,
+            else => error.InvalidType,
+        };
+    }
+
+    pub fn popNumber(self: *Self) ExecuteError!f64 {
+        const value = try self.pop();
+        return switch (value) {
+            .integer => |i| @floatFromInt(i),
+            .float => |f| f,
+            else => error.InvalidType,
+        };
+    }
+
+    pub fn popString(self: *Self) ExecuteError![]const u8 {
+        const value = try self.pop();
+        return switch (value) {
+            .string => |s| s,
+            else => error.InvalidType,
+        };
+    }
+
+    pub fn popArray(self: *Self) ExecuteError!jv.Array {
+        const value = try self.pop();
+        return switch (value) {
+            .array => |a| a,
+            else => error.InvalidType,
+        };
+    }
+};
+
+pub fn execute(allocator: std.mem.Allocator, instrs: []const Instr, input: jv.Value) !jv.Value {
+    var value_stack = try ValueStack.init(allocator);
+    defer value_stack.deinit();
+
+    try value_stack.push(input);
 
     const len = instrs.len;
     var pc: usize = 0;
@@ -21,27 +81,17 @@ pub fn execute(allocator: std.mem.Allocator, instrs: []const Instr, input: jv.Va
         switch (cur) {
             .nop => {},
             .array_index => {
-                const v1 = value_stack.pop() orelse return error.InternalError;
-                const v1_integer = switch (v1) {
-                    .integer => |integer| integer,
-                    else => return error.InvalidType,
-                };
-                const v2 = value_stack.pop() orelse return error.InternalError;
-                const v2_array = switch (v2) {
-                    .array => |array| array,
-                    else => return error.InvalidType,
-                };
-                const index: usize = @intCast(v1_integer);
-                const result = if (index < v2_array.items.len) v2_array.items[index] else .null;
-                try value_stack.append(allocator, result);
+                const index: usize = @intCast(try value_stack.popInteger());
+                const array = try value_stack.popArray();
+                const result = if (index < array.items.len) array.items[index] else .null;
+                try value_stack.push(result);
             },
             .literal => |value| {
-                try value_stack.append(allocator, value.*);
+                try value_stack.push(value.*);
             },
         }
         pc += 1;
     }
 
-    const result = value_stack.pop() orelse return error.InternalError;
-    return result;
+    return value_stack.pop();
 }
