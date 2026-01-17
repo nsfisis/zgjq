@@ -102,6 +102,15 @@ fn peekByte(reader: *std.Io.Reader) error{ReadFailed}!?u8 {
     };
 }
 
+fn takeByteIf(reader: *std.Io.Reader, expected: u8) error{ReadFailed}!bool {
+    if (try peekByte(reader) == expected) {
+        reader.toss(1);
+        return true;
+    } else {
+        return false;
+    }
+}
+
 fn isIdentifierStart(c: u8) bool {
     return std.ascii.isAlphabetic(c) or c == '_';
 }
@@ -119,7 +128,7 @@ fn tokenizeIdentifier(allocator: std.mem.Allocator, reader: *std.Io.Reader, firs
         while (try peekByte(reader)) |c| {
             if (isIdentifierContinue(c)) {
                 try buffer.append(allocator, c);
-                _ = reader.takeByte() catch unreachable;
+                reader.toss(1);
             } else {
                 break;
             }
@@ -152,100 +161,46 @@ pub fn tokenize(allocator: std.mem.Allocator, reader: *std.Io.Reader) ![]Token {
             error.EndOfStream => break,
             error.ReadFailed => return error.ReadFailed,
         };
-        switch (c) {
+        const token: Token = switch (c) {
             ' ', '\t', '\n', '\r' => continue,
-            '$' => try tokens.append(allocator, .dollar),
-            '%' => try tokens.append(allocator, if (try peekByte(reader) == '=') blk: {
-                _ = reader.takeByte() catch unreachable;
-                break :blk .percent_equal;
-            } else .percent),
-            '(' => try tokens.append(allocator, .paren_left),
-            ')' => try tokens.append(allocator, .paren_right),
-            '*' => try tokens.append(allocator, if (try peekByte(reader) == '=') blk: {
-                _ = reader.takeByte() catch unreachable;
-                break :blk .asterisk_equal;
-            } else .asterisk),
-            '+' => try tokens.append(allocator, if (try peekByte(reader) == '=') blk: {
-                _ = reader.takeByte() catch unreachable;
-                break :blk .plus_equal;
-            } else .plus),
-            ',' => try tokens.append(allocator, .comma),
-            '-' => try tokens.append(allocator, if (try peekByte(reader) == '=') blk: {
-                _ = reader.takeByte() catch unreachable;
-                break :blk .minus_equal;
-            } else .minus),
-            '.' => try tokens.append(allocator, if (try peekByte(reader) == '.') blk: {
-                _ = reader.takeByte() catch unreachable;
-                break :blk .dot_dot;
-            } else .dot),
-            '/' => {
-                if (try peekByte(reader) == '/') {
-                    _ = reader.takeByte() catch unreachable;
-                    try tokens.append(allocator, if (try peekByte(reader) == '=') blk: {
-                        _ = reader.takeByte() catch unreachable;
-                        break :blk .slash_slash_equal;
-                    } else .slash_slash);
-                } else if (try peekByte(reader) == '=') {
-                    _ = reader.takeByte() catch unreachable;
-                    try tokens.append(allocator, .slash_equal);
-                } else {
-                    try tokens.append(allocator, .slash);
-                }
-            },
-            ':' => try tokens.append(allocator, .colon),
-            ';' => try tokens.append(allocator, .semicolon),
-            '<' => try tokens.append(allocator, if (try peekByte(reader) == '=') blk: {
-                _ = reader.takeByte() catch unreachable;
-                break :blk .less_than_equal;
-            } else .less_than),
-            '=' => try tokens.append(allocator, if (try peekByte(reader) == '=') blk: {
-                _ = reader.takeByte() catch unreachable;
-                break :blk .equal_equal;
-            } else .equal),
-            '>' => try tokens.append(allocator, if (try peekByte(reader) == '=') blk: {
-                _ = reader.takeByte() catch unreachable;
-                break :blk .greater_than_equal;
-            } else .greater_than),
-            '!' => {
-                if (try peekByte(reader) == '=') {
-                    _ = reader.takeByte() catch unreachable;
-                    try tokens.append(allocator, .not_equal);
-                } else {
-                    return error.InvalidCharacter;
-                }
-            },
-            '?' => {
-                if (try peekByte(reader) == '/') {
-                    _ = reader.takeByte() catch unreachable;
-                    if (try peekByte(reader) == '/') {
-                        _ = reader.takeByte() catch unreachable;
-                        try tokens.append(allocator, .question_slash_slash);
-                    } else {
-                        return error.InvalidCharacter;
-                    }
-                } else {
-                    try tokens.append(allocator, .question);
-                }
-            },
-            '[' => try tokens.append(allocator, .bracket_left),
-            ']' => try tokens.append(allocator, .bracket_right),
-            '{' => try tokens.append(allocator, .brace_left),
-            '|' => try tokens.append(allocator, if (try peekByte(reader) == '=') blk: {
-                _ = reader.takeByte() catch unreachable;
-                break :blk .pipe_equal;
-            } else .pipe),
-            '}' => try tokens.append(allocator, .brace_right),
-            else => {
-                if (std.ascii.isDigit(c)) {
-                    try tokens.append(allocator, .{ .number = (c - '0') });
-                } else if (isIdentifierStart(c)) {
-                    const ident = try tokenizeIdentifier(allocator, reader, c);
-                    try tokens.append(allocator, .{ .identifier = ident });
-                } else {
-                    return error.InvalidCharacter;
-                }
-            },
-        }
+            '$' => .dollar,
+            '%' => if (try takeByteIf(reader, '=')) .percent_equal else .percent,
+            '(' => .paren_left,
+            ')' => .paren_right,
+            '*' => if (try takeByteIf(reader, '=')) .asterisk_equal else .asterisk,
+            '+' => if (try takeByteIf(reader, '=')) .plus_equal else .plus,
+            ',' => .comma,
+            '-' => if (try takeByteIf(reader, '=')) .minus_equal else .minus,
+            '.' => if (try takeByteIf(reader, '.')) .dot_dot else .dot,
+            '/' => if (try takeByteIf(reader, '/'))
+                if (try takeByteIf(reader, '=')) .slash_slash_equal else .slash_slash
+            else if (try takeByteIf(reader, '='))
+                .slash_equal
+            else
+                .slash,
+            ':' => .colon,
+            ';' => .semicolon,
+            '<' => if (try takeByteIf(reader, '=')) .less_than_equal else .less_than,
+            '=' => if (try takeByteIf(reader, '=')) .equal_equal else .equal,
+            '>' => if (try takeByteIf(reader, '=')) .greater_than_equal else .greater_than,
+            '!' => if (try takeByteIf(reader, '=')) .not_equal else return error.InvalidCharacter,
+            '?' => if (try takeByteIf(reader, '/'))
+                if (try takeByteIf(reader, '/')) .question_slash_slash else return error.InvalidCharacter
+            else
+                .question,
+            '[' => .bracket_left,
+            ']' => .bracket_right,
+            '{' => .brace_left,
+            '|' => if (try takeByteIf(reader, '=')) .pipe_equal else .pipe,
+            '}' => .brace_right,
+            else => if (std.ascii.isDigit(c))
+                .{ .number = (c - '0') }
+            else if (isIdentifierStart(c))
+                .{ .identifier = try tokenizeIdentifier(allocator, reader, c) }
+            else
+                return error.InvalidCharacter,
+        };
+        try tokens.append(allocator, token);
     }
 
     if (tokens.items.len == 0) {
