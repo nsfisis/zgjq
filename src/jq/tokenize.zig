@@ -44,6 +44,28 @@ pub const TokenKind = enum {
     slash_slash,
     slash_slash_equal,
 
+    keyword_and,
+    keyword_as,
+    keyword_break,
+    keyword_catch,
+    keyword_def,
+    keyword_elif,
+    keyword_else,
+    keyword_end,
+    keyword_false,
+    keyword_foreach,
+    keyword_if,
+    keyword_import,
+    keyword_include,
+    keyword_label,
+    keyword_module,
+    keyword_null,
+    keyword_or,
+    keyword_reduce,
+    keyword_then,
+    keyword_true,
+    keyword_try,
+
     identifier,
     number,
 };
@@ -86,6 +108,28 @@ pub const Token = union(TokenKind) {
     slash_equal,
     slash_slash,
     slash_slash_equal,
+
+    keyword_and,
+    keyword_as,
+    keyword_break,
+    keyword_catch,
+    keyword_def,
+    keyword_elif,
+    keyword_else,
+    keyword_end,
+    keyword_false,
+    keyword_foreach,
+    keyword_if,
+    keyword_import,
+    keyword_include,
+    keyword_label,
+    keyword_module,
+    keyword_null,
+    keyword_or,
+    keyword_reduce,
+    keyword_then,
+    keyword_true,
+    keyword_try,
 
     identifier: []const u8,
     number: i64,
@@ -168,6 +212,39 @@ fn tokenizeNumber(reader: *std.Io.Reader, first: u8) error{ReadFailed}!i64 {
     return value;
 }
 
+fn tryConvertToKeywordToken(identifier: []const u8) ?Token {
+    const keywords = .{
+        .{ "and", Token.keyword_and },
+        .{ "as", Token.keyword_as },
+        .{ "break", Token.keyword_break },
+        .{ "catch", Token.keyword_catch },
+        .{ "def", Token.keyword_def },
+        .{ "elif", Token.keyword_elif },
+        .{ "else", Token.keyword_else },
+        .{ "end", Token.keyword_end },
+        .{ "false", Token.keyword_false },
+        .{ "foreach", Token.keyword_foreach },
+        .{ "if", Token.keyword_if },
+        .{ "import", Token.keyword_import },
+        .{ "include", Token.keyword_include },
+        .{ "label", Token.keyword_label },
+        .{ "module", Token.keyword_module },
+        .{ "null", Token.keyword_null },
+        .{ "or", Token.keyword_or },
+        .{ "reduce", Token.keyword_reduce },
+        .{ "then", Token.keyword_then },
+        .{ "true", Token.keyword_true },
+        .{ "try", Token.keyword_try },
+    };
+
+    inline for (keywords) |keyword| {
+        if (std.mem.eql(u8, identifier, keyword[0])) {
+            return keyword[1];
+        }
+    }
+    return null;
+}
+
 pub fn tokenize(allocator: std.mem.Allocator, reader: *std.Io.Reader) ![]Token {
     var tokens = try std.ArrayList(Token).initCapacity(allocator, 16);
 
@@ -208,12 +285,16 @@ pub fn tokenize(allocator: std.mem.Allocator, reader: *std.Io.Reader) ![]Token {
             '{' => .brace_left,
             '|' => if (try takeByteIf(reader, '=')) .pipe_equal else .pipe,
             '}' => .brace_right,
-            else => if (std.ascii.isDigit(c))
-                .{ .number = try tokenizeNumber(reader, c) }
-            else if (isIdentifierStart(c))
-                .{ .identifier = try tokenizeIdentifier(allocator, reader, c) }
-            else
-                return error.InvalidCharacter,
+            else => blk: {
+                if (std.ascii.isDigit(c)) {
+                    break :blk .{ .number = try tokenizeNumber(reader, c) };
+                } else if (isIdentifierStart(c)) {
+                    const ident = try tokenizeIdentifier(allocator, reader, c);
+                    break :blk tryConvertToKeywordToken(ident) orelse Token{ .identifier = ident };
+                } else {
+                    return error.InvalidCharacter;
+                }
+            },
         };
         try tokens.append(allocator, token);
     }
@@ -382,4 +463,58 @@ test "tokenize identifier in complex query" {
     try std.testing.expectEqual(.pipe, tokens[2]);
     try std.testing.expectEqualStrings("bar::baz", tokens[3].identifier);
     try std.testing.expectEqual(.end, tokens[4]);
+}
+
+test "tokenize keywords" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed(
+        \\and as break catch def elif else end false foreach
+        \\if import include label module null or reduce then true try
+    );
+    const tokens = try tokenize(allocator.allocator(), &reader);
+
+    const expected = [_]Token{
+        .keyword_and,
+        .keyword_as,
+        .keyword_break,
+        .keyword_catch,
+        .keyword_def,
+        .keyword_elif,
+        .keyword_else,
+        .keyword_end,
+        .keyword_false,
+        .keyword_foreach,
+        .keyword_if,
+        .keyword_import,
+        .keyword_include,
+        .keyword_label,
+        .keyword_module,
+        .keyword_null,
+        .keyword_or,
+        .keyword_reduce,
+        .keyword_then,
+        .keyword_true,
+        .keyword_try,
+        .end,
+    };
+    try std.testing.expectEqual(expected.len, tokens.len);
+    for (expected, tokens) |e, t| {
+        try std.testing.expectEqual(e, t);
+    }
+}
+
+test "tokenize keyword-like identifiers" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed("iff define for");
+    const tokens = try tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectEqual(4, tokens.len);
+    try std.testing.expectEqualStrings("iff", tokens[0].identifier);
+    try std.testing.expectEqualStrings("define", tokens[1].identifier);
+    try std.testing.expectEqualStrings("for", tokens[2].identifier);
+    try std.testing.expectEqual(.end, tokens[3]);
 }
