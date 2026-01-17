@@ -155,6 +155,43 @@ fn takeByteIf(reader: *std.Io.Reader, expected: u8) error{ReadFailed}!bool {
     }
 }
 
+fn skipComment(reader: *std.Io.Reader) error{ReadFailed}!void {
+    var is_last_character_unescaped_backslash = false;
+
+    while (true) {
+        const c = reader.takeByte() catch |err| switch (err) {
+            error.EndOfStream => return,
+            error.ReadFailed => return error.ReadFailed,
+        };
+
+        if (c == '\n') {
+            if (is_last_character_unescaped_backslash) {
+                is_last_character_unescaped_backslash = false;
+                continue; // comment line continuation
+            } else {
+                return;
+            }
+        } else if (c == '\r') {
+            // Check CRLF.
+            if (try peekByte(reader) == '\n') {
+                reader.toss(1);
+                if (is_last_character_unescaped_backslash) {
+                    is_last_character_unescaped_backslash = false;
+                    continue; // comment line continuation
+                } else {
+                    return;
+                }
+            }
+            is_last_character_unescaped_backslash = false;
+            // NOTE: single CR is not treated as line break, as the original jq does.
+        } else if (c == '\\') {
+            is_last_character_unescaped_backslash = !is_last_character_unescaped_backslash;
+        } else {
+            is_last_character_unescaped_backslash = false;
+        }
+    }
+}
+
 fn isIdentifierStart(c: u8) bool {
     return std.ascii.isAlphabetic(c) or c == '_';
 }
@@ -255,6 +292,10 @@ pub fn tokenize(allocator: std.mem.Allocator, reader: *std.Io.Reader) ![]Token {
         };
         const token: Token = switch (c) {
             ' ', '\t', '\n', '\r' => continue,
+            '#' => {
+                try skipComment(reader);
+                continue;
+            },
             '$' => .dollar,
             '%' => if (try takeByteIf(reader, '=')) .percent_equal else .percent,
             '(' => .paren_left,
@@ -517,4 +558,138 @@ test "tokenize keyword-like identifiers" {
     try std.testing.expectEqualStrings("define", tokens[1].identifier);
     try std.testing.expectEqualStrings("for", tokens[2].identifier);
     try std.testing.expectEqual(.end, tokens[3]);
+}
+
+test "tokenize with comments" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed(
+        \\.foo # this is a comment
+        \\| bar
+    );
+    const tokens = try tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectEqual(5, tokens.len);
+    try std.testing.expectEqual(.dot, tokens[0]);
+    try std.testing.expectEqualStrings("foo", tokens[1].identifier);
+    try std.testing.expectEqual(.pipe, tokens[2]);
+    try std.testing.expectEqualStrings("bar", tokens[3].identifier);
+    try std.testing.expectEqual(.end, tokens[4]);
+}
+
+test "tokenize comment at end of input" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed(".foo # comment without newline");
+    const tokens = try tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectEqual(3, tokens.len);
+    try std.testing.expectEqual(.dot, tokens[0]);
+    try std.testing.expectEqualStrings("foo", tokens[1].identifier);
+    try std.testing.expectEqual(.end, tokens[2]);
+}
+
+test "tokenize comment with line continuation" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed(
+        \\.foo # comment \
+        \\this is also comment
+        \\| bar
+    );
+    const tokens = try tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectEqual(5, tokens.len);
+    try std.testing.expectEqual(.dot, tokens[0]);
+    try std.testing.expectEqualStrings("foo", tokens[1].identifier);
+    try std.testing.expectEqual(.pipe, tokens[2]);
+    try std.testing.expectEqualStrings("bar", tokens[3].identifier);
+    try std.testing.expectEqual(.end, tokens[4]);
+}
+
+test "tokenize comment with escaped backslash before newline" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    // Two backslashes (even) before newline: comment ends
+    var reader = std.Io.Reader.fixed(
+        \\.foo # comment \\
+        \\| bar
+    );
+    const tokens = try tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectEqual(5, tokens.len);
+    try std.testing.expectEqual(.dot, tokens[0]);
+    try std.testing.expectEqualStrings("foo", tokens[1].identifier);
+    try std.testing.expectEqual(.pipe, tokens[2]);
+    try std.testing.expectEqualStrings("bar", tokens[3].identifier);
+    try std.testing.expectEqual(.end, tokens[4]);
+}
+
+test "tokenize comment with three backslashes before newline" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    // Three backslashes (odd) before newline: comment continues
+    var reader = std.Io.Reader.fixed(
+        \\.foo # comment \\\
+        \\this is also comment
+        \\| bar
+    );
+    const tokens = try tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectEqual(5, tokens.len);
+    try std.testing.expectEqual(.dot, tokens[0]);
+    try std.testing.expectEqualStrings("foo", tokens[1].identifier);
+    try std.testing.expectEqual(.pipe, tokens[2]);
+    try std.testing.expectEqualStrings("bar", tokens[3].identifier);
+    try std.testing.expectEqual(.end, tokens[4]);
+}
+
+test "tokenize comment with CRLF" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed(".foo # comment\r\n| bar");
+    const tokens = try tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectEqual(5, tokens.len);
+    try std.testing.expectEqual(.dot, tokens[0]);
+    try std.testing.expectEqualStrings("foo", tokens[1].identifier);
+    try std.testing.expectEqual(.pipe, tokens[2]);
+    try std.testing.expectEqualStrings("bar", tokens[3].identifier);
+    try std.testing.expectEqual(.end, tokens[4]);
+}
+
+test "tokenize comment with line continuation before CRLF" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed(".foo # comment \\\r\nthis is also comment\r\n| bar");
+    const tokens = try tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectEqual(5, tokens.len);
+    try std.testing.expectEqual(.dot, tokens[0]);
+    try std.testing.expectEqualStrings("foo", tokens[1].identifier);
+    try std.testing.expectEqual(.pipe, tokens[2]);
+    try std.testing.expectEqualStrings("bar", tokens[3].identifier);
+    try std.testing.expectEqual(.end, tokens[4]);
+}
+
+test "tokenize comment with single CR does not end comment" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed(".foo # comment\r| bar\n| baz");
+    const tokens = try tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectEqual(5, tokens.len);
+    try std.testing.expectEqual(.dot, tokens[0]);
+    try std.testing.expectEqualStrings("foo", tokens[1].identifier);
+    try std.testing.expectEqual(.pipe, tokens[2]);
+    try std.testing.expectEqualStrings("baz", tokens[3].identifier);
+    try std.testing.expectEqual(.end, tokens[4]);
 }
