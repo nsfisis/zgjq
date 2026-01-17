@@ -1,23 +1,41 @@
-//! By convention, root.zig is the root source file when making a library.
 const std = @import("std");
+pub const jq = @import("./jq.zig");
+pub const jv = @import("./jv.zig");
 
-pub fn bufferedPrint() !void {
-    // Stdout is for the actual output of your application, for example if you
-    // are implementing gzip, then only the compressed bytes should be sent to
-    // stdout, not any debugging messages.
-    var stdout_buffer: [1024]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
-    const stdout = &stdout_writer.interface;
+pub fn run(allocator: std.mem.Allocator, input: []const u8, query: []const u8) ![]const u8 {
+    var compile_allocator = std.heap.ArenaAllocator.init(allocator);
+    defer compile_allocator.deinit();
+    const tokens = try jq.tokenize(compile_allocator.allocator(), query);
+    const ast = try jq.parse(compile_allocator.allocator(), tokens);
+    const instrs = try jq.compile(allocator, compile_allocator.allocator(), ast);
+    defer allocator.free(instrs);
 
-    try stdout.print("Run `zig build test` to run the tests.\n", .{});
-
-    try stdout.flush(); // Don't forget to flush!
+    const parsed = try jv.parse(allocator, input);
+    defer parsed.deinit();
+    const json = parsed.value;
+    const result = try jq.execute(allocator, instrs, json);
+    const output = try jv.stringify(allocator, result);
+    return output;
 }
 
-pub fn add(a: i32, b: i32) i32 {
-    return a + b;
+fn testRun(expected: []const u8, allocator: std.mem.Allocator, input: []const u8, query: []const u8) !void {
+    const result = try run(allocator, input, query);
+    defer allocator.free(result);
+    try std.testing.expectEqualStrings(expected, result);
 }
 
-test "basic add functionality" {
-    try std.testing.expect(add(3, 7) == 10);
+test "identity filter" {
+    var debug_allocator = std.heap.DebugAllocator(.{}).init;
+    defer std.debug.assert(debug_allocator.deinit() == .ok);
+    const allocator = debug_allocator.allocator();
+
+    try testRun("null", allocator, "null", ".");
+    try testRun("false", allocator, "false", ".");
+    try testRun("true", allocator, "true", ".");
+    try testRun("123", allocator, "123", ".");
+    try testRun("3.1415", allocator, "3.1415", ".");
+    try testRun("[]", allocator, "[]", ".");
+    try testRun("{}", allocator, "{}", ".");
+    try testRun("[1,2,3]", allocator, "[1,2,3]", ".");
+    try testRun("{\"a\":123}", allocator, "{\"a\":123}", ".");
 }
