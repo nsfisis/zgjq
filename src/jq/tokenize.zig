@@ -153,6 +153,21 @@ fn tokenizeIdentifier(allocator: std.mem.Allocator, reader: *std.Io.Reader, firs
     return buffer.toOwnedSlice(allocator);
 }
 
+fn tokenizeNumber(reader: *std.Io.Reader, first: u8) error{ReadFailed}!i64 {
+    var value: i64 = first - '0';
+
+    while (try peekByte(reader)) |c| {
+        if (std.ascii.isDigit(c)) {
+            value = value * 10 + (c - '0');
+            reader.toss(1);
+        } else {
+            break;
+        }
+    }
+
+    return value;
+}
+
 pub fn tokenize(allocator: std.mem.Allocator, reader: *std.Io.Reader) ![]Token {
     var tokens = try std.array_list.Aligned(Token, null).initCapacity(allocator, 16);
 
@@ -194,7 +209,7 @@ pub fn tokenize(allocator: std.mem.Allocator, reader: *std.Io.Reader) ![]Token {
             '|' => if (try takeByteIf(reader, '=')) .pipe_equal else .pipe,
             '}' => .brace_right,
             else => if (std.ascii.isDigit(c))
-                .{ .number = (c - '0') }
+                .{ .number = try tokenizeNumber(reader, c) }
             else if (isIdentifierStart(c))
                 .{ .identifier = try tokenizeIdentifier(allocator, reader, c) }
             else
@@ -269,12 +284,13 @@ test "tokenize number" {
     var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer allocator.deinit();
 
-    var reader = std.Io.Reader.fixed("5");
+    var reader = std.Io.Reader.fixed("5 123");
     const tokens = try tokenize(allocator.allocator(), &reader);
 
-    try std.testing.expectEqual(2, tokens.len);
+    try std.testing.expectEqual(3, tokens.len);
     try std.testing.expectEqual(Token{ .number = 5 }, tokens[0]);
-    try std.testing.expectEqual(.end, tokens[1]);
+    try std.testing.expectEqual(Token{ .number = 123 }, tokens[1]);
+    try std.testing.expectEqual(.end, tokens[2]);
 }
 
 test "tokenize array index" {
