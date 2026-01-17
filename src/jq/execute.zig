@@ -100,6 +100,8 @@ pub fn execute(allocator: std.mem.Allocator, instrs: []const Instr, input: jv.Va
         const cur = instrs[pc];
         switch (cur) {
             .nop => {},
+            .subexp_begin => try value_stack.dup(),
+            .subexp_end => value_stack.swap(),
             .array_index => {
                 const array = try value_stack.popArray();
                 const index: usize = @intCast(try value_stack.popInteger());
@@ -113,8 +115,6 @@ pub fn execute(allocator: std.mem.Allocator, instrs: []const Instr, input: jv.Va
                 const result = lhs + rhs;
                 try value_stack.push(.{ .integer = result });
             },
-            .subexp_begin => try value_stack.dup(),
-            .subexp_end => value_stack.swap(),
             .object_key => |key| {
                 const obj = try value_stack.popObject();
                 const result = obj.get(key) orelse .null;

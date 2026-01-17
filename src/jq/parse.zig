@@ -14,6 +14,7 @@ pub const AstKind = enum {
     object_key,
     literal,
     binary_expr,
+    pipe,
 };
 
 pub const BinaryOp = enum {
@@ -26,6 +27,7 @@ pub const Ast = union(AstKind) {
     object_key: []const u8,
     literal: *jv.Value,
     binary_expr: struct { op: BinaryOp, lhs: *Ast, rhs: *Ast },
+    pipe: struct { lhs: *Ast, rhs: *Ast },
 
     pub fn kind(self: @This()) AstKind {
         return self;
@@ -76,29 +78,47 @@ pub fn parse(allocator: std.mem.Allocator, tokens: []const Token) !*Ast {
 }
 
 // GRAMMAR
-//   query := expr
+//   query := expr ("|" expr)*
 fn parseQuery(allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
-    const result = try parseExpr(allocator, tokens);
+    var lhs = try parseExpr(allocator, tokens);
+    while (true) {
+        const token = try tokens.peek();
+        if (token.kind() == .pipe) {
+            _ = try tokens.next();
+            const rhs = try parseExpr(allocator, tokens);
+            const ast = try allocator.create(Ast);
+            ast.* = .{ .pipe = .{
+                .lhs = lhs,
+                .rhs = rhs,
+            } };
+            lhs = ast;
+        } else {
+            break;
+        }
+    }
     _ = try tokens.expect(.end);
-    return result;
+    return lhs;
 }
 
 // GRAMMAR
-//   expr := term
-//         | term + term
+//   expr := term ("+" term)*
 fn parseExpr(allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
     var lhs = try parseTerm(allocator, tokens);
-    const token = try tokens.peek();
-    if (token.kind() == .plus) {
-        _ = try tokens.next();
-        const rhs = try parseTerm(allocator, tokens);
-        const ast = try allocator.create(Ast);
-        ast.* = .{ .binary_expr = .{
-            .op = .add,
-            .lhs = lhs,
-            .rhs = rhs,
-        } };
-        lhs = ast;
+    while (true) {
+        const token = try tokens.peek();
+        if (token.kind() == .plus) {
+            _ = try tokens.next();
+            const rhs = try parseTerm(allocator, tokens);
+            const ast = try allocator.create(Ast);
+            ast.* = .{ .binary_expr = .{
+                .op = .add,
+                .lhs = lhs,
+                .rhs = rhs,
+            } };
+            lhs = ast;
+        } else {
+            break;
+        }
     }
     return lhs;
 }
@@ -123,7 +143,7 @@ fn parseTerm(allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
 
     const next_token = try tokens.peek();
     switch (next_token.kind()) {
-        .end => {
+        .end, .pipe, .plus => {
             const ast = try allocator.create(Ast);
             ast.* = .identity;
             return ast;

@@ -54,6 +54,14 @@ pub fn compile(allocator: std.mem.Allocator, compile_allocator: std.mem.Allocato
             try instrs.append(allocator, .subexp_end);
             try instrs.append(allocator, .add);
         },
+        .pipe => |pipe_expr| {
+            const lhs_instrs = try compile(allocator, compile_allocator, pipe_expr.lhs);
+            defer allocator.free(lhs_instrs);
+            const rhs_instrs = try compile(allocator, compile_allocator, pipe_expr.rhs);
+            defer allocator.free(rhs_instrs);
+            try instrs.appendSlice(allocator, lhs_instrs);
+            try instrs.appendSlice(allocator, rhs_instrs);
+        },
     }
 
     return instrs.toOwnedSlice(allocator);

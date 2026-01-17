@@ -79,4 +79,15 @@ test "addition" {
     try testRun("579", allocator, "null", "123 + 456");
     try testRun("35", allocator, "{\"a\":12,\"b\":23}", ".a + .b");
     try testRun("12", allocator, "[1,2,3]", ".[1] + 10");
+    try testRun("6", allocator, "null", "1 + 2 + 3");
+}
+
+test "pipe operator" {
+    var debug_allocator = std.heap.DebugAllocator(.{}).init;
+    defer std.debug.assert(debug_allocator.deinit() == .ok);
+    const allocator = debug_allocator.allocator();
+
+    try testRun("123", allocator, "{\"a\":{\"b\":123}}", ".a | .b");
+    try testRun("584", allocator, "null", "123 + 456 | . + 5");
+    try testRun("10", allocator, "null", "1 | . + 2 | . + 3 | . | 4 + .");
 }
