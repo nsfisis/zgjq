@@ -1,21 +1,35 @@
 const std = @import("std");
+const jv = @import("../jv.zig");
 const Ast = @import("./parse.zig").Ast;
 
 pub const Opcode = enum {
     nop,
-    identity,
+    array_index,
+    literal,
 };
 
-pub const Instr = struct {
-    op: Opcode,
+pub const Instr = union(Opcode) {
+    nop,
+    array_index,
+    literal: *jv.Value,
+
+    pub fn op(self: @This()) Opcode {
+        return self;
+    }
 };
 
 pub fn compile(allocator: std.mem.Allocator, compile_allocator: std.mem.Allocator, ast: *const Ast) ![]Instr {
-    _ = compile_allocator;
     var instrs = try std.array_list.Aligned(Instr, null).initCapacity(allocator, 16);
 
-    switch (ast.kind) {
-        .identity => try instrs.append(allocator, .{ .op = .identity }),
+    switch (ast.*) {
+        .identity => try instrs.append(allocator, .nop),
+        .array_index => |index| {
+            const index_instrs = try compile(allocator, compile_allocator, index);
+            defer allocator.free(index_instrs);
+            try instrs.appendSlice(allocator, index_instrs);
+            try instrs.append(allocator, .array_index);
+        },
+        .literal => |value| try instrs.append(allocator, .{ .literal = value }),
     }
 
     return instrs.toOwnedSlice(allocator);

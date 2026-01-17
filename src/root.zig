@@ -39,3 +39,13 @@ test "identity filter" {
     try testRun("[1,2,3]", allocator, "[1,2,3]", ".");
     try testRun("{\"a\":123}", allocator, "{\"a\":123}", ".");
 }
+
+test "array index filter" {
+    var debug_allocator = std.heap.DebugAllocator(.{}).init;
+    defer std.debug.assert(debug_allocator.deinit() == .ok);
+    const allocator = debug_allocator.allocator();
+
+    try testRun("null", allocator, "[]", ".[0]");
+    try testRun("1", allocator, "[1,2,3]", ".[0]");
+    try testRun("null", allocator, "[1,2,3]", ".[5]");
+}
