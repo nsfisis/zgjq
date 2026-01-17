@@ -44,6 +44,7 @@ pub const TokenKind = enum {
     slash_slash,
     slash_slash_equal,
 
+    identifier,
     number,
 };
 
@@ -86,6 +87,7 @@ pub const Token = union(TokenKind) {
     slash_slash,
     slash_slash_equal,
 
+    identifier: []const u8,
     number: i64,
 
     pub fn kind(self: @This()) TokenKind {
@@ -98,6 +100,48 @@ fn peekByte(reader: *std.Io.Reader) error{ReadFailed}!?u8 {
         error.EndOfStream => null,
         error.ReadFailed => error.ReadFailed,
     };
+}
+
+fn isIdentifierStart(c: u8) bool {
+    return std.ascii.isAlphabetic(c) or c == '_';
+}
+
+fn isIdentifierContinue(c: u8) bool {
+    return std.ascii.isAlphanumeric(c) or c == '_';
+}
+
+fn tokenizeIdentifier(allocator: std.mem.Allocator, reader: *std.Io.Reader, first: u8) ![]const u8 {
+    var buffer = try std.array_list.Aligned(u8, null).initCapacity(allocator, 16);
+    try buffer.append(allocator, first);
+
+    while (true) {
+        // Read an identifier.
+        while (try peekByte(reader)) |c| {
+            if (isIdentifierContinue(c)) {
+                try buffer.append(allocator, c);
+                _ = reader.takeByte() catch unreachable;
+            } else {
+                break;
+            }
+        }
+
+        // Check namespaced identifier (e.g., "foo::bar").
+        const lookahead = reader.peek(3) catch |err| switch (err) {
+            error.EndOfStream => break,
+            error.ReadFailed => return error.ReadFailed,
+        };
+        if (lookahead[0] == ':' and lookahead[1] == ':' and isIdentifierStart(lookahead[2])) {
+            try buffer.append(allocator, ':');
+            try buffer.append(allocator, ':');
+            try buffer.append(allocator, lookahead[2]);
+            reader.toss(3);
+            continue;
+        } else {
+            break;
+        }
+    }
+
+    return buffer.toOwnedSlice(allocator);
 }
 
 pub fn tokenize(allocator: std.mem.Allocator, reader: *std.Io.Reader) ![]Token {
@@ -194,6 +238,9 @@ pub fn tokenize(allocator: std.mem.Allocator, reader: *std.Io.Reader) ![]Token {
             else => {
                 if (std.ascii.isDigit(c)) {
                     try tokens.append(allocator, .{ .number = (c - '0') });
+                } else if (isIdentifierStart(c)) {
+                    const ident = try tokenizeIdentifier(allocator, reader, c);
+                    try tokens.append(allocator, .{ .identifier = ident });
                 } else {
                     return error.InvalidCharacter;
                 }
@@ -308,4 +355,60 @@ test "tokenize invalid character returns error" {
     const result = tokenize(allocator.allocator(), &reader);
 
     try std.testing.expectError(error.InvalidCharacter, result);
+}
+
+test "tokenize identifiers" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed("foo _foo foo2");
+    const tokens = try tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectEqual(4, tokens.len);
+    try std.testing.expectEqualStrings("foo", tokens[0].identifier);
+    try std.testing.expectEqualStrings("_foo", tokens[1].identifier);
+    try std.testing.expectEqualStrings("foo2", tokens[2].identifier);
+    try std.testing.expectEqual(.end, tokens[3]);
+}
+
+test "tokenize namespaced identifier" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed("foo::bar foo::bar::baz");
+    const tokens = try tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectEqual(3, tokens.len);
+    try std.testing.expectEqualStrings("foo::bar", tokens[0].identifier);
+    try std.testing.expectEqualStrings("foo::bar::baz", tokens[1].identifier);
+    try std.testing.expectEqual(.end, tokens[2]);
+}
+
+test "tokenize identifier followed by colon" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed("foo:bar");
+    const tokens = try tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectEqual(4, tokens.len);
+    try std.testing.expectEqualStrings("foo", tokens[0].identifier);
+    try std.testing.expectEqual(.colon, tokens[1]);
+    try std.testing.expectEqualStrings("bar", tokens[2].identifier);
+    try std.testing.expectEqual(.end, tokens[3]);
+}
+
+test "tokenize identifier in complex query" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed(".foo | bar::baz");
+    const tokens = try tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectEqual(5, tokens.len);
+    try std.testing.expectEqual(.dot, tokens[0]);
+    try std.testing.expectEqualStrings("foo", tokens[1].identifier);
+    try std.testing.expectEqual(.pipe, tokens[2]);
+    try std.testing.expectEqualStrings("bar::baz", tokens[3].identifier);
+    try std.testing.expectEqual(.end, tokens[4]);
 }
