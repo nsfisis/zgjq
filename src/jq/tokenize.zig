@@ -54,3 +54,66 @@ pub fn tokenize(allocator: std.mem.Allocator, reader: *std.Io.Reader) ![]Token {
     try tokens.append(allocator, .end);
     return tokens.toOwnedSlice(allocator);
 }
+
+test "tokenize symbols" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed(
+        \\.[]
+    );
+    const tokens = try tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectEqual(4, tokens.len);
+    try std.testing.expectEqual(.dot, tokens[0]);
+    try std.testing.expectEqual(.bracket_left, tokens[1]);
+    try std.testing.expectEqual(.bracket_right, tokens[2]);
+    try std.testing.expectEqual(.end, tokens[3]);
+}
+
+test "tokenize number" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed("5");
+    const tokens = try tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectEqual(2, tokens.len);
+    try std.testing.expectEqual(Token{ .number = 5 }, tokens[0]);
+    try std.testing.expectEqual(.end, tokens[1]);
+}
+
+test "tokenize array index" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed(".[0]");
+    const tokens = try tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectEqual(5, tokens.len);
+    try std.testing.expectEqual(.dot, tokens[0]);
+    try std.testing.expectEqual(.bracket_left, tokens[1]);
+    try std.testing.expectEqual(Token{ .number = 0 }, tokens[2]);
+    try std.testing.expectEqual(.bracket_right, tokens[3]);
+    try std.testing.expectEqual(.end, tokens[4]);
+}
+
+test "tokenize empty input returns error" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed("");
+    const result = tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectError(error.UnexpectedEnd, result);
+}
+
+test "tokenize invalid character returns error" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed("`");
+    const result = tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectError(error.InvalidCharacter, result);
+}
