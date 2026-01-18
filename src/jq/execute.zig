@@ -1,6 +1,9 @@
 const std = @import("std");
 const jv = @import("../jv.zig");
+const tokenize = @import("./tokenize.zig").tokenize;
+const parse = @import("./parse.zig").parse;
 const Instr = @import("./compile.zig").Instr;
+const compile = @import("./compile.zig").compile;
 
 pub const ExecuteError = error{
     Unimplemented,
@@ -105,27 +108,52 @@ const ValueStack = struct {
 pub const Runtime = struct {
     const Self = @This();
 
+    allocator: std.mem.Allocator,
     values: ValueStack,
     instrs: []const Instr,
-    input: jv.Value,
     pc: usize,
 
-    pub fn init(allocator: std.mem.Allocator, instrs: []const Instr, input: jv.Value) !Self {
-        var self = Self{
+    pub fn init(allocator: std.mem.Allocator) !Self {
+        return .{
+            .allocator = allocator,
             .values = try ValueStack.init(allocator),
-            .instrs = instrs,
-            .input = input,
+            .instrs = &[_]Instr{},
             .pc = 0,
         };
-        try self.values.push(input);
-        return self;
     }
 
     pub fn deinit(self: *Self) void {
+        for (self.instrs) |instr| {
+            instr.deinit(self.allocator);
+        }
+        self.allocator.free(self.instrs);
+
         self.values.deinit();
     }
 
+    pub fn compileFromReader(self: *Self, reader: *std.Io.Reader) !void {
+        std.debug.assert(self.instrs.len == 0);
+
+        var compile_allocator = std.heap.ArenaAllocator.init(self.allocator);
+        defer compile_allocator.deinit();
+        const tokens = try tokenize(compile_allocator.allocator(), reader);
+        const ast = try parse(self.allocator, compile_allocator.allocator(), tokens);
+        const instrs = try compile(self.allocator, compile_allocator.allocator(), ast);
+        self.instrs = instrs;
+    }
+
+    pub fn compileFromSlice(self: *Self, query: []const u8) !void {
+        var reader = std.Io.Reader.fixed(query);
+        return self.compileFromReader(&reader);
+    }
+
+    pub fn start(self: *Self, input: jv.Value) !void {
+        try self.values.push(input);
+    }
+
     pub fn next(self: *Self) !?jv.Value {
+        std.debug.assert(self.instrs.len > 0);
+
         while (self.pc < self.instrs.len) : (self.pc += 1) {
             const cur = self.instrs[self.pc];
             switch (cur) {

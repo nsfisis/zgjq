@@ -3,40 +3,28 @@ pub const jq = @import("./jq.zig");
 pub const jv = @import("./jv.zig");
 
 pub fn run(allocator: std.mem.Allocator, input: []const u8, query: []const u8) ![]const u8 {
-    var compile_allocator = std.heap.ArenaAllocator.init(allocator);
-    defer compile_allocator.deinit();
-    var reader = std.Io.Reader.fixed(query);
-    const tokens = try jq.tokenize(compile_allocator.allocator(), &reader);
-    const ast = try jq.parse(compile_allocator.allocator(), tokens);
-    const instrs = try jq.compile(allocator, compile_allocator.allocator(), ast);
-    defer allocator.free(instrs);
-
     const parsed = try jv.parse(allocator, input);
     defer parsed.deinit();
     const json = parsed.value;
 
-    var runtime = try jq.Runtime.init(allocator, instrs, json);
+    var runtime = try jq.Runtime.init(allocator);
     defer runtime.deinit();
+    try runtime.compileFromSlice(query);
+    try runtime.start(json);
     const result = try runtime.next() orelse return error.NoResult;
     const output = try jv.stringify(allocator, result);
     return output;
 }
 
 fn testRun(expected: []const u8, allocator: std.mem.Allocator, input: []const u8, query: []const u8) !void {
-    var compile_allocator = std.heap.ArenaAllocator.init(allocator);
-    defer compile_allocator.deinit();
-    var reader = std.Io.Reader.fixed(query);
-    const tokens = try jq.tokenize(compile_allocator.allocator(), &reader);
-    const ast = try jq.parse(compile_allocator.allocator(), tokens);
-    const instrs = try jq.compile(allocator, compile_allocator.allocator(), ast);
-    defer allocator.free(instrs);
-
     const parsed = try jv.parse(allocator, input);
     defer parsed.deinit();
     const json = parsed.value;
 
-    var runtime = try jq.Runtime.init(allocator, instrs, json);
+    var runtime = try jq.Runtime.init(allocator);
     defer runtime.deinit();
+    try runtime.compileFromSlice(query);
+    try runtime.start(json);
 
     const result_value = try runtime.next() orelse return error.NoResult;
     const result = try jv.stringify(allocator, result_value);

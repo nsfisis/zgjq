@@ -14,6 +14,8 @@ pub const Opcode = enum {
 };
 
 pub const Instr = union(Opcode) {
+    const Self = @This();
+
     nop,
     ret,
     subexp_begin,
@@ -23,8 +25,16 @@ pub const Instr = union(Opcode) {
     object_key: []const u8,
     literal: *jv.Value,
 
-    pub fn op(self: @This()) Opcode {
+    pub fn op(self: Self) Opcode {
         return self;
+    }
+
+    pub fn deinit(self: Self, allocator: std.mem.Allocator) void {
+        switch (self) {
+            .object_key => |key| allocator.free(key),
+            .literal => |value| allocator.destroy(value),
+            else => {},
+        }
     }
 };
 
