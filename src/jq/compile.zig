@@ -4,6 +4,7 @@ const Ast = @import("./parse.zig").Ast;
 
 pub const Opcode = enum {
     nop,
+    ret,
     subexp_begin,
     subexp_end,
     array_index,
@@ -14,6 +15,7 @@ pub const Opcode = enum {
 
 pub const Instr = union(Opcode) {
     nop,
+    ret,
     subexp_begin,
     subexp_end,
     array_index,
@@ -26,13 +28,13 @@ pub const Instr = union(Opcode) {
     }
 };
 
-pub fn compile(allocator: std.mem.Allocator, compile_allocator: std.mem.Allocator, ast: *const Ast) ![]Instr {
+fn compileExpr(allocator: std.mem.Allocator, compile_allocator: std.mem.Allocator, ast: *const Ast) ![]Instr {
     var instrs = try std.ArrayList(Instr).initCapacity(allocator, 16);
 
     switch (ast.*) {
         .identity => try instrs.append(allocator, .nop),
         .array_index => |index| {
-            const index_instrs = try compile(allocator, compile_allocator, index);
+            const index_instrs = try compileExpr(allocator, compile_allocator, index);
             defer allocator.free(index_instrs);
             try instrs.append(allocator, .subexp_begin);
             try instrs.appendSlice(allocator, index_instrs);
@@ -42,9 +44,9 @@ pub fn compile(allocator: std.mem.Allocator, compile_allocator: std.mem.Allocato
         .object_key => |key| try instrs.append(allocator, .{ .object_key = key }),
         .literal => |value| try instrs.append(allocator, .{ .literal = value }),
         .binary_expr => |binary_expr| {
-            const rhs_instrs = try compile(allocator, compile_allocator, binary_expr.rhs);
+            const rhs_instrs = try compileExpr(allocator, compile_allocator, binary_expr.rhs);
             defer allocator.free(rhs_instrs);
-            const lhs_instrs = try compile(allocator, compile_allocator, binary_expr.lhs);
+            const lhs_instrs = try compileExpr(allocator, compile_allocator, binary_expr.lhs);
             defer allocator.free(lhs_instrs);
             try instrs.append(allocator, .subexp_begin);
             try instrs.appendSlice(allocator, rhs_instrs);
@@ -55,14 +57,23 @@ pub fn compile(allocator: std.mem.Allocator, compile_allocator: std.mem.Allocato
             try instrs.append(allocator, .add);
         },
         .pipe => |pipe_expr| {
-            const lhs_instrs = try compile(allocator, compile_allocator, pipe_expr.lhs);
+            const lhs_instrs = try compileExpr(allocator, compile_allocator, pipe_expr.lhs);
             defer allocator.free(lhs_instrs);
-            const rhs_instrs = try compile(allocator, compile_allocator, pipe_expr.rhs);
+            const rhs_instrs = try compileExpr(allocator, compile_allocator, pipe_expr.rhs);
             defer allocator.free(rhs_instrs);
             try instrs.appendSlice(allocator, lhs_instrs);
             try instrs.appendSlice(allocator, rhs_instrs);
         },
     }
 
+    return instrs.toOwnedSlice(allocator);
+}
+
+pub fn compile(allocator: std.mem.Allocator, compile_allocator: std.mem.Allocator, ast: *const Ast) ![]Instr {
+    var instrs = try std.ArrayList(Instr).initCapacity(allocator, 16);
+    const expr_instrs = try compileExpr(allocator, compile_allocator, ast);
+    defer allocator.free(expr_instrs);
+    try instrs.appendSlice(allocator, expr_instrs);
+    try instrs.append(allocator, .ret);
     return instrs.toOwnedSlice(allocator);
 }

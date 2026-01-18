@@ -102,53 +102,73 @@ const ValueStack = struct {
     }
 };
 
-pub fn execute(allocator: std.mem.Allocator, instrs: []const Instr, input: jv.Value) !jv.Value {
-    var value_stack = try ValueStack.init(allocator);
-    defer value_stack.deinit();
+pub const Runtime = struct {
+    const Self = @This();
 
-    try value_stack.push(input);
+    values: ValueStack,
+    instrs: []const Instr,
+    input: jv.Value,
+    pc: usize,
 
-    const len = instrs.len;
-    var pc: usize = 0;
-    while (pc < len) {
-        const cur = instrs[pc];
-        switch (cur) {
-            .nop => {},
-            .subexp_begin => try value_stack.dup(),
-            .subexp_end => try value_stack.swap(),
-            .array_index => {
-                std.debug.assert(value_stack.ensureSize(2));
-
-                const array = try value_stack.popArray();
-                const index: usize = @intCast(try value_stack.popInteger());
-                const result = if (index < array.items.len) array.items[index] else .null;
-                try value_stack.push(result);
-            },
-            .add => {
-                std.debug.assert(value_stack.ensureSize(3));
-
-                _ = value_stack.pop();
-                const lhs = try value_stack.popInteger();
-                const rhs = try value_stack.popInteger();
-                const result = lhs + rhs;
-                try value_stack.push(.{ .integer = result });
-            },
-            .object_key => |key| {
-                std.debug.assert(value_stack.ensureSize(1));
-
-                const obj = try value_stack.popObject();
-                const result = obj.get(key) orelse .null;
-                try value_stack.push(result);
-            },
-            .literal => |value| {
-                std.debug.assert(value_stack.ensureSize(1));
-
-                _ = value_stack.pop();
-                try value_stack.push(value.*);
-            },
-        }
-        pc += 1;
+    pub fn init(allocator: std.mem.Allocator, instrs: []const Instr, input: jv.Value) !Self {
+        var self = Self{
+            .values = try ValueStack.init(allocator),
+            .instrs = instrs,
+            .input = input,
+            .pc = 0,
+        };
+        try self.values.push(input);
+        return self;
     }
 
-    return value_stack.pop();
-}
+    pub fn deinit(self: *Self) void {
+        self.values.deinit();
+    }
+
+    pub fn next(self: *Self) !?jv.Value {
+        while (self.pc < self.instrs.len) : (self.pc += 1) {
+            const cur = self.instrs[self.pc];
+            switch (cur) {
+                .nop => {},
+                .ret => {
+                    self.pc += 1;
+                    return self.values.pop();
+                },
+                .subexp_begin => try self.values.dup(),
+                .subexp_end => try self.values.swap(),
+                .array_index => {
+                    std.debug.assert(self.values.ensureSize(2));
+
+                    const array = try self.values.popArray();
+                    const index: usize = @intCast(try self.values.popInteger());
+                    const result = if (index < array.items.len) array.items[index] else .null;
+                    try self.values.push(result);
+                },
+                .add => {
+                    std.debug.assert(self.values.ensureSize(3));
+
+                    _ = self.values.pop();
+                    const lhs = try self.values.popInteger();
+                    const rhs = try self.values.popInteger();
+                    const result = lhs + rhs;
+                    try self.values.push(.{ .integer = result });
+                },
+                .object_key => |key| {
+                    std.debug.assert(self.values.ensureSize(1));
+
+                    const obj = try self.values.popObject();
+                    const result = obj.get(key) orelse .null;
+                    try self.values.push(result);
+                },
+                .literal => |value| {
+                    std.debug.assert(self.values.ensureSize(1));
+
+                    _ = self.values.pop();
+                    try self.values.push(value.*);
+                },
+            }
+        }
+
+        return null;
+    }
+};

@@ -13,4 +13,4 @@ pub const Instr = @import("./jq/compile.zig").Instr;
 pub const compile = @import("./jq/compile.zig").compile;
 
 pub const ExecuteError = @import("./jq/execute.zig").ExecuteError;
-pub const execute = @import("./jq/execute.zig").execute;
+pub const Runtime = @import("./jq/execute.zig").Runtime;
