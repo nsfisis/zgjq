@@ -5,6 +5,8 @@ const Ast = @import("./parse.zig").Ast;
 pub const Opcode = enum {
     nop,
     ret,
+    jump,
+    fork,
     subexp_begin,
     subexp_end,
     array_index,
@@ -18,6 +20,8 @@ pub const Instr = union(Opcode) {
 
     nop,
     ret,
+    jump: usize,
+    fork: usize,
     subexp_begin,
     subexp_end,
     array_index,
@@ -73,6 +77,27 @@ fn compileExpr(allocator: std.mem.Allocator, compile_allocator: std.mem.Allocato
             defer allocator.free(rhs_instrs);
             try instrs.appendSlice(allocator, lhs_instrs);
             try instrs.appendSlice(allocator, rhs_instrs);
+        },
+        .comma => |comma_expr| {
+            //     FORK l1
+            //     <lhs>
+            //     JUMP l2
+            // l1: <rhs>
+            // l2:
+            const lhs_instrs = try compileExpr(allocator, compile_allocator, comma_expr.lhs);
+            defer allocator.free(lhs_instrs);
+            const rhs_instrs = try compileExpr(allocator, compile_allocator, comma_expr.rhs);
+            defer allocator.free(rhs_instrs);
+            const fork_index = instrs.items.len;
+            try instrs.append(allocator, .{ .fork = 0 });
+            try instrs.appendSlice(allocator, lhs_instrs);
+            const jump_index = instrs.items.len;
+            try instrs.append(allocator, .{ .jump = 0 });
+            const l1 = instrs.items.len;
+            try instrs.appendSlice(allocator, rhs_instrs);
+            const l2 = instrs.items.len;
+            instrs.items[fork_index] = .{ .fork = l1 - fork_index };
+            instrs.items[jump_index] = .{ .jump = l2 - jump_index };
         },
     }
 

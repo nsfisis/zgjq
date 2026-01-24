@@ -15,6 +15,7 @@ pub const AstKind = enum {
     literal,
     binary_expr,
     pipe,
+    comma,
 };
 
 pub const BinaryOp = enum {
@@ -28,6 +29,7 @@ pub const Ast = union(AstKind) {
     literal: *jv.Value,
     binary_expr: struct { op: BinaryOp, lhs: *Ast, rhs: *Ast },
     pipe: struct { lhs: *Ast, rhs: *Ast },
+    comma: struct { lhs: *Ast, rhs: *Ast },
 
     pub fn kind(self: @This()) AstKind {
         return self;
@@ -101,8 +103,36 @@ fn parseQuery(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, 
 }
 
 // GRAMMAR
-//   expr := term ("+" term)*
+//   expr := expr1
 fn parseExpr(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
+    return parseExpr1(allocator, parse_allocator, tokens);
+}
+
+// GRAMMAR
+//   expr1 := expr2 ("," expr2)*
+fn parseExpr1(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
+    var lhs = try parseExpr2(allocator, parse_allocator, tokens);
+    while (true) {
+        const token = try tokens.peek();
+        if (token.kind() == .comma) {
+            _ = try tokens.next();
+            const rhs = try parseExpr2(allocator, parse_allocator, tokens);
+            const ast = try parse_allocator.create(Ast);
+            ast.* = .{ .comma = .{
+                .lhs = lhs,
+                .rhs = rhs,
+            } };
+            lhs = ast;
+        } else {
+            break;
+        }
+    }
+    return lhs;
+}
+
+// GRAMMAR
+//   expr2 := term ("+" term)*
+fn parseExpr2(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
     var lhs = try parseTerm(allocator, parse_allocator, tokens);
     while (true) {
         const token = try tokens.peek();

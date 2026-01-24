@@ -110,6 +110,7 @@ pub const Runtime = struct {
 
     allocator: std.mem.Allocator,
     values: ValueStack,
+    forks: std.ArrayList(usize),
     instrs: []const Instr,
     pc: usize,
 
@@ -117,6 +118,7 @@ pub const Runtime = struct {
         return .{
             .allocator = allocator,
             .values = try ValueStack.init(allocator),
+            .forks = .{},
             .instrs = &[_]Instr{},
             .pc = 0,
         };
@@ -129,6 +131,7 @@ pub const Runtime = struct {
         self.allocator.free(self.instrs);
 
         self.values.deinit();
+        self.forks.deinit(self.allocator);
     }
 
     pub fn compileFromReader(self: *Self, reader: *std.Io.Reader) !void {
@@ -140,6 +143,11 @@ pub const Runtime = struct {
         const ast = try parse(self.allocator, compile_allocator.allocator(), tokens);
         const instrs = try compile(self.allocator, compile_allocator.allocator(), ast);
         self.instrs = instrs;
+        // std.debug.print("BEGIN\n", .{});
+        // for (self.instrs) |instr| {
+        //     std.debug.print("{}\n", .{instr});
+        // }
+        // std.debug.print("END\n", .{});
     }
 
     pub fn compileFromSlice(self: *Self, query: []const u8) !void {
@@ -154,13 +162,22 @@ pub const Runtime = struct {
     pub fn next(self: *Self) !?jv.Value {
         std.debug.assert(self.instrs.len > 0);
 
+        self.restore_stack();
+
         while (self.pc < self.instrs.len) : (self.pc += 1) {
             const cur = self.instrs[self.pc];
+            // std.debug.print("{}\n", .{cur});
             switch (cur) {
                 .nop => {},
                 .ret => {
                     self.pc += 1;
                     return self.values.pop();
+                },
+                .jump => |offset| {
+                    self.pc += offset - 1;
+                },
+                .fork => |offset| {
+                    try self.save_stack(self.pc + offset);
                 },
                 .subexp_begin => try self.values.dup(),
                 .subexp_end => try self.values.swap(),
@@ -198,5 +215,17 @@ pub const Runtime = struct {
         }
 
         return null;
+    }
+
+    fn save_stack(self: *Self, target_pc: usize) !void {
+        try self.forks.append(self.allocator, target_pc);
+        try self.values.save();
+    }
+
+    fn restore_stack(self: *Self) void {
+        if (self.forks.pop()) |target_pc| {
+            self.pc = target_pc;
+            self.values.restore();
+        }
     }
 };
