@@ -19,7 +19,28 @@ pub const AstKind = enum {
 };
 
 pub const BinaryOp = enum {
+    alt,
+    assign,
+    update,
+    alt_assign,
+    add_assign,
+    sub_assign,
+    mul_assign,
+    div_assign,
+    mod_assign,
+    @"or",
+    @"and",
+    eq,
+    ne,
+    lt,
+    gt,
+    le,
+    ge,
     add,
+    sub,
+    mul,
+    div,
+    mod,
 };
 
 pub const Ast = union(AstKind) {
@@ -79,15 +100,25 @@ pub fn parse(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, t
     return parseQuery(allocator, parse_allocator, &token_stream);
 }
 
-// GRAMMAR
-//   query := expr ("|" expr)*
+fn parseProgram(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
+    return parseBody(allocator, parse_allocator, tokens);
+}
+
+fn parseBody(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
+    return parseQuery(allocator, parse_allocator, tokens);
+}
+
 fn parseQuery(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
-    var lhs = try parseExpr(allocator, parse_allocator, tokens);
+    return parseQuery2(allocator, parse_allocator, tokens);
+}
+
+fn parseQuery2(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
+    var lhs = try parseQuery3(allocator, parse_allocator, tokens);
     while (true) {
-        const token = try tokens.peek();
+        const token = tokens.peek() catch break;
         if (token.kind() == .pipe) {
             _ = try tokens.next();
-            const rhs = try parseExpr(allocator, parse_allocator, tokens);
+            const rhs = try parseQuery3(allocator, parse_allocator, tokens);
             const ast = try parse_allocator.create(Ast);
             ast.* = .{ .pipe = .{
                 .lhs = lhs,
@@ -102,21 +133,13 @@ fn parseQuery(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, 
     return lhs;
 }
 
-// GRAMMAR
-//   expr := expr1
-fn parseExpr(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
-    return parseExpr1(allocator, parse_allocator, tokens);
-}
-
-// GRAMMAR
-//   expr1 := expr2 ("," expr2)*
-fn parseExpr1(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
-    var lhs = try parseExpr2(allocator, parse_allocator, tokens);
+fn parseQuery3(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
+    var lhs = try parseExpr(allocator, parse_allocator, tokens);
     while (true) {
-        const token = try tokens.peek();
+        const token = tokens.peek() catch return lhs;
         if (token.kind() == .comma) {
             _ = try tokens.next();
-            const rhs = try parseExpr2(allocator, parse_allocator, tokens);
+            const rhs = try parseExpr(allocator, parse_allocator, tokens);
             const ast = try parse_allocator.create(Ast);
             ast.* = .{ .comma = .{
                 .lhs = lhs,
@@ -130,18 +153,16 @@ fn parseExpr1(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, 
     return lhs;
 }
 
-// GRAMMAR
-//   expr2 := term ("+" term)*
-fn parseExpr2(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
-    var lhs = try parseTerm(allocator, parse_allocator, tokens);
+fn parseExpr(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
+    var lhs = try parseExpr2(allocator, parse_allocator, tokens);
     while (true) {
         const token = try tokens.peek();
-        if (token.kind() == .plus) {
+        if (token.kind() == .slash_slash) {
             _ = try tokens.next();
-            const rhs = try parseTerm(allocator, parse_allocator, tokens);
+            const rhs = try parseExpr2(allocator, parse_allocator, tokens);
             const ast = try parse_allocator.create(Ast);
             ast.* = .{ .binary_expr = .{
-                .op = .add,
+                .op = .alt,
                 .lhs = lhs,
                 .rhs = rhs,
             } };
@@ -153,11 +174,131 @@ fn parseExpr2(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, 
     return lhs;
 }
 
-// GRAMMAR
-//   term := "."
-//         | "." field_access
-//         | "." index_access
-//         | NUMBER
+fn parseExpr2(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
+    const lhs = try parseExpr3(allocator, parse_allocator, tokens);
+    const token = tokens.peek() catch return lhs;
+    const op: BinaryOp = switch (token.kind()) {
+        .equal => .assign,
+        .pipe_equal => .update,
+        .slash_slash_equal => .alt_assign,
+        .plus_equal => .add_assign,
+        .minus_equal => .sub_assign,
+        .asterisk_equal => .mul_assign,
+        .slash_equal => .div_assign,
+        .percent_equal => .mod_assign,
+        else => return lhs,
+    };
+    _ = try tokens.next();
+    const rhs = try parseExpr3(allocator, parse_allocator, tokens);
+    const ast = try parse_allocator.create(Ast);
+    ast.* = .{ .binary_expr = .{
+        .op = op,
+        .lhs = lhs,
+        .rhs = rhs,
+    } };
+    return ast;
+}
+
+fn parseExpr3(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
+    const lhs = try parseExpr4(allocator, parse_allocator, tokens);
+    const token = tokens.peek() catch return lhs;
+    if (token.kind() != .keyword_or) {
+        return lhs;
+    }
+    _ = try tokens.next();
+    const rhs = try parseExpr4(allocator, parse_allocator, tokens);
+    const ast = try parse_allocator.create(Ast);
+    ast.* = .{ .binary_expr = .{
+        .op = .@"or",
+        .lhs = lhs,
+        .rhs = rhs,
+    } };
+    return ast;
+}
+
+fn parseExpr4(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
+    const lhs = try parseExpr5(allocator, parse_allocator, tokens);
+    const token = tokens.peek() catch return lhs;
+    if (token.kind() != .keyword_and) {
+        return lhs;
+    }
+    _ = try tokens.next();
+    const rhs = try parseExpr5(allocator, parse_allocator, tokens);
+    const ast = try parse_allocator.create(Ast);
+    ast.* = .{ .binary_expr = .{
+        .op = .@"and",
+        .lhs = lhs,
+        .rhs = rhs,
+    } };
+    return ast;
+}
+
+fn parseExpr5(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
+    const lhs = try parseExpr6(allocator, parse_allocator, tokens);
+    const token = tokens.peek() catch return lhs;
+    const op: BinaryOp = switch (token.kind()) {
+        .equal_equal => .eq,
+        .not_equal => .ne,
+        .less_than => .lt,
+        .greater_than => .gt,
+        .less_than_equal => .le,
+        .greater_than_equal => .ge,
+        else => return lhs,
+    };
+    _ = try tokens.next();
+    const rhs = try parseExpr6(allocator, parse_allocator, tokens);
+    const ast = try parse_allocator.create(Ast);
+    ast.* = .{ .binary_expr = .{
+        .op = op,
+        .lhs = lhs,
+        .rhs = rhs,
+    } };
+    return ast;
+}
+
+fn parseExpr6(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
+    var lhs = try parseExpr7(allocator, parse_allocator, tokens);
+    while (true) {
+        const token = tokens.peek() catch return lhs;
+        const op: BinaryOp = switch (token.kind()) {
+            .plus => .add,
+            .minus => .sub,
+            else => return lhs,
+        };
+        _ = try tokens.next();
+        const rhs = try parseExpr7(allocator, parse_allocator, tokens);
+        const ast = try parse_allocator.create(Ast);
+        ast.* = .{ .binary_expr = .{
+            .op = op,
+            .lhs = lhs,
+            .rhs = rhs,
+        } };
+        lhs = ast;
+    }
+}
+
+fn parseExpr7(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
+    var lhs = try parseTerm(allocator, parse_allocator, tokens);
+    while (true) {
+        const token = tokens.peek() catch return lhs;
+        const op: BinaryOp = switch (token.kind()) {
+            .asterisk => .mul,
+            .slash => .div,
+            .percent => .mod,
+            else => return lhs,
+        };
+        _ = try tokens.next();
+        const rhs = try parseTerm(allocator, parse_allocator, tokens);
+        const ast = try parse_allocator.create(Ast);
+        ast.* = .{ .binary_expr = .{
+            .op = op,
+            .lhs = lhs,
+            .rhs = rhs,
+        } };
+        lhs = ast;
+    }
+}
+
 fn parseTerm(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
     const first_token = try tokens.peek();
     if (first_token.kind() == .number) {
@@ -179,23 +320,46 @@ fn parseTerm(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, t
 
     const next_token = try tokens.peek();
     switch (next_token.kind()) {
-        .end, .pipe, .plus => {
-            const ast = try parse_allocator.create(Ast);
-            ast.* = .identity;
-            return ast;
-        },
         .identifier => {
             return parseFieldAccess(allocator, parse_allocator, tokens);
         },
         .bracket_left => {
             return parseIndexAccess(allocator, parse_allocator, tokens);
         },
+        .end,
+        .pipe,
+        .comma,
+        .slash_slash,
+        .equal,
+        .pipe_equal,
+        .slash_slash_equal,
+        .plus_equal,
+        .minus_equal,
+        .asterisk_equal,
+        .slash_equal,
+        .percent_equal,
+        .keyword_or,
+        .keyword_and,
+        .equal_equal,
+        .not_equal,
+        .less_than,
+        .greater_than,
+        .less_than_equal,
+        .greater_than_equal,
+        .plus,
+        .minus,
+        .asterisk,
+        .slash,
+        .percent,
+        => {
+            const ast = try parse_allocator.create(Ast);
+            ast.* = .identity;
+            return ast;
+        },
         else => return error.InvalidQuery,
     }
 }
 
-// GRAMMAR
-//   field_access := IDENTIFIER
 fn parseFieldAccess(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
     const token = try tokens.expect(.identifier);
     const ast = try parse_allocator.create(Ast);
@@ -203,8 +367,6 @@ fn parseFieldAccess(allocator: std.mem.Allocator, parse_allocator: std.mem.Alloc
     return ast;
 }
 
-// GRAMMAR
-//   index_access := "[" NUMBER "]"
 fn parseIndexAccess(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
     _ = try tokens.expect(.bracket_left);
     const index_token = try tokens.expect(.number);
