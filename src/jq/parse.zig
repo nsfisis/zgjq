@@ -366,6 +366,24 @@ fn parsePrimary(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator
             ast.* = .identity;
             return ast;
         },
+        .bracket_left => {
+            _ = try tokens.next();
+            _ = try tokens.expect(.bracket_right);
+            const array_value = try allocator.create(jv.Value);
+            array_value.* = .{ .array = jv.Array.init(allocator) };
+            const array_node = try parse_allocator.create(Ast);
+            array_node.* = .{ .literal = array_value };
+            return array_node;
+        },
+        .brace_left => {
+            _ = try tokens.next();
+            _ = try tokens.expect(.brace_right);
+            const object_value = try allocator.create(jv.Value);
+            object_value.* = .{ .object = jv.Object.init(allocator) };
+            const object_node = try parse_allocator.create(Ast);
+            object_node.* = .{ .literal = object_value };
+            return object_node;
+        },
         .field => |name| {
             _ = try tokens.next();
             const ast = try parse_allocator.create(Ast);

@@ -47,6 +47,10 @@ test "literals" {
     try testRun("\"\"", "null", "\"\"");
     try testRun("\"hello\\nworld\"", "null", "\"hello\\nworld\"");
     try testRun("\"hello\"", "{\"a\":1}", "\"hello\"");
+    try testRun("[]", "null", "[]");
+    try testRun("{}", "null", "{}");
+    try testRun("[]", "{\"a\":1}", "[]");
+    try testRun("{}", "[1,2,3]", "{}");
 }
 
 test "identity filter" {
