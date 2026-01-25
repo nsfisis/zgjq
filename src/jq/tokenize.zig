@@ -3,6 +3,9 @@ const std = @import("std");
 pub const TokenizeError = error{
     UnexpectedEnd,
     InvalidCharacter,
+    UnterminatedString,
+    InvalidEscapeSequence,
+    InvalidUnicodeEscape,
     InvalidNumber,
 };
 
@@ -69,6 +72,7 @@ pub const TokenKind = enum {
 
     identifier,
     number,
+    string,
     format,
 };
 
@@ -135,6 +139,7 @@ pub const Token = union(TokenKind) {
 
     identifier: []const u8,
     number: f64,
+    string: []const u8,
     format: []const u8,
 
     pub fn kind(self: @This()) TokenKind {
@@ -304,8 +309,100 @@ fn tokenizeNumber(allocator: std.mem.Allocator, reader: *std.Io.Reader, first: u
         }
     }
 
-    const slice = buffer.toOwnedSlice(allocator) catch return error.OutOfMemory;
-    return std.fmt.parseFloat(f64, slice) catch return error.InvalidNumber;
+    const slice = try buffer.toOwnedSlice(allocator);
+    return try std.fmt.parseFloat(f64, slice);
+}
+
+fn appendUtf8(buffer: *std.ArrayList(u8), allocator: std.mem.Allocator, codepoint: u21) !void {
+    var utf8_buf: [4]u8 = undefined;
+    const len = std.unicode.utf8Encode(codepoint, &utf8_buf) catch return error.InvalidUnicodeEscape;
+    for (utf8_buf[0..len]) |byte| {
+        try buffer.append(allocator, byte);
+    }
+}
+
+fn parseUnicodeEscape(reader: *std.Io.Reader) !u16 {
+    const bytes = reader.peek(4) catch |err| switch (err) {
+        error.EndOfStream => return error.InvalidUnicodeEscape,
+        error.ReadFailed => return error.ReadFailed,
+    };
+    reader.toss(4);
+
+    var value: u16 = 0;
+    for (bytes) |b| {
+        const digit: u16 = switch (b) {
+            '0'...'9' => b - '0',
+            'a'...'f' => b - 'a' + 10,
+            'A'...'F' => b - 'A' + 10,
+            else => return error.InvalidUnicodeEscape,
+        };
+        value = value * 16 + digit;
+    }
+    return value;
+}
+
+fn tokenizeString(allocator: std.mem.Allocator, reader: *std.Io.Reader) ![]const u8 {
+    var buffer = try std.ArrayList(u8).initCapacity(allocator, 32);
+
+    while (true) {
+        const c = reader.takeByte() catch |err| switch (err) {
+            error.EndOfStream => return error.UnterminatedString,
+            error.ReadFailed => return error.ReadFailed,
+        };
+
+        switch (c) {
+            '"' => break,
+            '\\' => {
+                const escape = reader.takeByte() catch |err| switch (err) {
+                    error.EndOfStream => return error.UnterminatedString,
+                    error.ReadFailed => return error.ReadFailed,
+                };
+                switch (escape) {
+                    '"' => try buffer.append(allocator, '"'),
+                    '\\' => try buffer.append(allocator, '\\'),
+                    '/' => try buffer.append(allocator, '/'),
+                    'b' => try buffer.append(allocator, 0x08),
+                    'f' => try buffer.append(allocator, 0x0C),
+                    'n' => try buffer.append(allocator, '\n'),
+                    'r' => try buffer.append(allocator, '\r'),
+                    't' => try buffer.append(allocator, '\t'),
+                    'u' => {
+                        const high = try parseUnicodeEscape(reader);
+                        // Check for surrogate pair
+                        if (high >= 0xD800 and high <= 0xDBFF) {
+                            // High surrogate, expect low surrogate
+                            const backslash = reader.takeByte() catch |err| switch (err) {
+                                error.EndOfStream => return error.InvalidUnicodeEscape,
+                                error.ReadFailed => return error.ReadFailed,
+                            };
+                            const u_char = reader.takeByte() catch |err| switch (err) {
+                                error.EndOfStream => return error.InvalidUnicodeEscape,
+                                error.ReadFailed => return error.ReadFailed,
+                            };
+                            if (backslash != '\\' or u_char != 'u') {
+                                return error.InvalidUnicodeEscape;
+                            }
+                            const low = try parseUnicodeEscape(reader);
+                            if (low < 0xDC00 or low > 0xDFFF) {
+                                return error.InvalidUnicodeEscape;
+                            }
+                            const codepoint: u21 = 0x10000 + (@as(u21, high - 0xD800) << 10) + (low - 0xDC00);
+                            try appendUtf8(&buffer, allocator, codepoint);
+                        } else if (high >= 0xDC00 and high <= 0xDFFF) {
+                            // Lone low surrogate is invalid
+                            return error.InvalidUnicodeEscape;
+                        } else {
+                            try appendUtf8(&buffer, allocator, high);
+                        }
+                    },
+                    else => return error.InvalidEscapeSequence,
+                }
+            },
+            else => try buffer.append(allocator, c),
+        }
+    }
+
+    return buffer.toOwnedSlice(allocator);
 }
 
 fn tokenizeFormat(allocator: std.mem.Allocator, reader: *std.Io.Reader) ![]const u8 {
@@ -378,6 +475,7 @@ pub fn tokenize(allocator: std.mem.Allocator, reader: *std.Io.Reader) ![]Token {
                 try skipComment(reader);
                 continue;
             },
+            '"' => .{ .string = try tokenizeString(allocator, reader) },
             '$' => .dollar,
             '%' => if (try takeByteIf(reader, '=')) .percent_equal else .percent,
             '(' => .paren_left,
@@ -904,4 +1002,151 @@ test "tokenize format invalid" {
     const result = tokenize(allocator.allocator(), &reader);
 
     try std.testing.expectError(error.InvalidCharacter, result);
+}
+
+test "tokenize simple string" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed("\"hello\"");
+    const tokens = try tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectEqual(2, tokens.len);
+    try std.testing.expectEqualStrings("hello", tokens[0].string);
+    try std.testing.expectEqual(.end, tokens[1]);
+}
+
+test "tokenize empty string" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed("\"\"");
+    const tokens = try tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectEqual(2, tokens.len);
+    try std.testing.expectEqualStrings("", tokens[0].string);
+    try std.testing.expectEqual(.end, tokens[1]);
+}
+
+test "tokenize string with escape sequences" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed("\"hello\\nworld\"");
+    const tokens = try tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectEqual(2, tokens.len);
+    try std.testing.expectEqualStrings("hello\nworld", tokens[0].string);
+    try std.testing.expectEqual(.end, tokens[1]);
+}
+
+test "tokenize string with all escape sequences" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed("\"\\\"\\\\\\/\\b\\f\\n\\r\\t\"");
+    const tokens = try tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectEqual(2, tokens.len);
+    try std.testing.expectEqualStrings("\"\\/\x08\x0c\n\r\t", tokens[0].string);
+    try std.testing.expectEqual(.end, tokens[1]);
+}
+
+test "tokenize string with unicode escape" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    // \u0041 = 'A', \u3042 = 'あ'
+    var reader = std.Io.Reader.fixed("\"\\u0041\\u3042\"");
+    const tokens = try tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectEqual(2, tokens.len);
+    try std.testing.expectEqualStrings("Aあ", tokens[0].string);
+    try std.testing.expectEqual(.end, tokens[1]);
+}
+
+test "tokenize string with surrogate pair" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    // \uD83D\uDE00 = '😀' (U+1F600)
+    var reader = std.Io.Reader.fixed("\"\\uD83D\\uDE00\"");
+    const tokens = try tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectEqual(2, tokens.len);
+    try std.testing.expectEqualStrings("😀", tokens[0].string);
+    try std.testing.expectEqual(.end, tokens[1]);
+}
+
+test "tokenize multiple strings" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed("\"hello\" \"world\"");
+    const tokens = try tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectEqual(3, tokens.len);
+    try std.testing.expectEqualStrings("hello", tokens[0].string);
+    try std.testing.expectEqualStrings("world", tokens[1].string);
+    try std.testing.expectEqual(.end, tokens[2]);
+}
+
+test "tokenize unterminated string" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed("\"hello");
+    const result = tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectError(error.UnterminatedString, result);
+}
+
+test "tokenize invalid escape sequence" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed("\"\\x\"");
+    const result = tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectError(error.InvalidEscapeSequence, result);
+}
+
+test "tokenize invalid unicode escape" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed("\"\\u00GG\"");
+    const result = tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectError(error.InvalidUnicodeEscape, result);
+}
+
+test "tokenize invalid unicode escape short" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed("\"\\u00\"");
+    const result = tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectError(error.InvalidUnicodeEscape, result);
+}
+
+test "tokenize lone high surrogate" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed("\"\\uD83D\"");
+    const result = tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectError(error.InvalidUnicodeEscape, result);
+}
+
+test "tokenize lone low surrogate" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed("\"\\uDE00\"");
+    const result = tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectError(error.InvalidUnicodeEscape, result);
 }
