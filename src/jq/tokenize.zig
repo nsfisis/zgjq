@@ -74,6 +74,7 @@ pub const TokenKind = enum {
     number,
     string,
     format,
+    field,
 };
 
 pub const Token = union(TokenKind) {
@@ -141,6 +142,7 @@ pub const Token = union(TokenKind) {
     number: f64,
     string: []const u8,
     format: []const u8,
+    field: []const u8,
 
     pub fn kind(self: @This()) TokenKind {
         return self;
@@ -234,6 +236,22 @@ fn tokenizeIdentifier(allocator: std.mem.Allocator, reader: *std.Io.Reader, firs
             try buffer.append(allocator, lookahead[2]);
             reader.toss(3);
             continue;
+        } else {
+            break;
+        }
+    }
+
+    return buffer.toOwnedSlice(allocator);
+}
+
+fn tokenizeField(allocator: std.mem.Allocator, reader: *std.Io.Reader, first: u8) ![]const u8 {
+    var buffer = try std.ArrayList(u8).initCapacity(allocator, 16);
+    try buffer.append(allocator, first);
+
+    while (try peekByte(reader)) |c| {
+        if (isIdentifierContinue(c)) {
+            try buffer.append(allocator, c);
+            reader.toss(1);
         } else {
             break;
         }
@@ -484,7 +502,18 @@ pub fn tokenize(allocator: std.mem.Allocator, reader: *std.Io.Reader) ![]Token {
             '+' => if (try takeByteIf(reader, '=')) .plus_equal else .plus,
             ',' => .comma,
             '-' => if (try takeByteIf(reader, '=')) .minus_equal else .minus,
-            '.' => if (try takeByteIf(reader, '.')) .dot_dot else .dot,
+            '.' => blk: {
+                if (try takeByteIf(reader, '.')) {
+                    break :blk .dot_dot;
+                }
+                if (try peekByte(reader)) |next| {
+                    if (isIdentifierStart(next)) {
+                        reader.toss(1);
+                        break :blk Token{ .field = try tokenizeField(allocator, reader, next) };
+                    }
+                }
+                break :blk .dot;
+            },
             '/' => if (try takeByteIf(reader, '/'))
                 if (try takeByteIf(reader, '=')) .slash_slash_equal else .slash_slash
             else if (try takeByteIf(reader, '='))
@@ -679,12 +708,11 @@ test "tokenize identifier in complex query" {
     var reader = std.Io.Reader.fixed(".foo | bar::baz");
     const tokens = try tokenize(allocator.allocator(), &reader);
 
-    try std.testing.expectEqual(5, tokens.len);
-    try std.testing.expectEqual(.dot, tokens[0]);
-    try std.testing.expectEqualStrings("foo", tokens[1].identifier);
-    try std.testing.expectEqual(.pipe, tokens[2]);
-    try std.testing.expectEqualStrings("bar::baz", tokens[3].identifier);
-    try std.testing.expectEqual(.end, tokens[4]);
+    try std.testing.expectEqual(4, tokens.len);
+    try std.testing.expectEqualStrings("foo", tokens[0].field);
+    try std.testing.expectEqual(.pipe, tokens[1]);
+    try std.testing.expectEqualStrings("bar::baz", tokens[2].identifier);
+    try std.testing.expectEqual(.end, tokens[3]);
 }
 
 test "tokenize keywords" {
@@ -751,12 +779,11 @@ test "tokenize with comments" {
     );
     const tokens = try tokenize(allocator.allocator(), &reader);
 
-    try std.testing.expectEqual(5, tokens.len);
-    try std.testing.expectEqual(.dot, tokens[0]);
-    try std.testing.expectEqualStrings("foo", tokens[1].identifier);
-    try std.testing.expectEqual(.pipe, tokens[2]);
-    try std.testing.expectEqualStrings("bar", tokens[3].identifier);
-    try std.testing.expectEqual(.end, tokens[4]);
+    try std.testing.expectEqual(4, tokens.len);
+    try std.testing.expectEqualStrings("foo", tokens[0].field);
+    try std.testing.expectEqual(.pipe, tokens[1]);
+    try std.testing.expectEqualStrings("bar", tokens[2].identifier);
+    try std.testing.expectEqual(.end, tokens[3]);
 }
 
 test "tokenize comment at end of input" {
@@ -766,10 +793,9 @@ test "tokenize comment at end of input" {
     var reader = std.Io.Reader.fixed(".foo # comment without newline");
     const tokens = try tokenize(allocator.allocator(), &reader);
 
-    try std.testing.expectEqual(3, tokens.len);
-    try std.testing.expectEqual(.dot, tokens[0]);
-    try std.testing.expectEqualStrings("foo", tokens[1].identifier);
-    try std.testing.expectEqual(.end, tokens[2]);
+    try std.testing.expectEqual(2, tokens.len);
+    try std.testing.expectEqualStrings("foo", tokens[0].field);
+    try std.testing.expectEqual(.end, tokens[1]);
 }
 
 test "tokenize comment with line continuation" {
@@ -783,12 +809,11 @@ test "tokenize comment with line continuation" {
     );
     const tokens = try tokenize(allocator.allocator(), &reader);
 
-    try std.testing.expectEqual(5, tokens.len);
-    try std.testing.expectEqual(.dot, tokens[0]);
-    try std.testing.expectEqualStrings("foo", tokens[1].identifier);
-    try std.testing.expectEqual(.pipe, tokens[2]);
-    try std.testing.expectEqualStrings("bar", tokens[3].identifier);
-    try std.testing.expectEqual(.end, tokens[4]);
+    try std.testing.expectEqual(4, tokens.len);
+    try std.testing.expectEqualStrings("foo", tokens[0].field);
+    try std.testing.expectEqual(.pipe, tokens[1]);
+    try std.testing.expectEqualStrings("bar", tokens[2].identifier);
+    try std.testing.expectEqual(.end, tokens[3]);
 }
 
 test "tokenize comment with escaped backslash before newline" {
@@ -802,12 +827,11 @@ test "tokenize comment with escaped backslash before newline" {
     );
     const tokens = try tokenize(allocator.allocator(), &reader);
 
-    try std.testing.expectEqual(5, tokens.len);
-    try std.testing.expectEqual(.dot, tokens[0]);
-    try std.testing.expectEqualStrings("foo", tokens[1].identifier);
-    try std.testing.expectEqual(.pipe, tokens[2]);
-    try std.testing.expectEqualStrings("bar", tokens[3].identifier);
-    try std.testing.expectEqual(.end, tokens[4]);
+    try std.testing.expectEqual(4, tokens.len);
+    try std.testing.expectEqualStrings("foo", tokens[0].field);
+    try std.testing.expectEqual(.pipe, tokens[1]);
+    try std.testing.expectEqualStrings("bar", tokens[2].identifier);
+    try std.testing.expectEqual(.end, tokens[3]);
 }
 
 test "tokenize comment with three backslashes before newline" {
@@ -822,12 +846,11 @@ test "tokenize comment with three backslashes before newline" {
     );
     const tokens = try tokenize(allocator.allocator(), &reader);
 
-    try std.testing.expectEqual(5, tokens.len);
-    try std.testing.expectEqual(.dot, tokens[0]);
-    try std.testing.expectEqualStrings("foo", tokens[1].identifier);
-    try std.testing.expectEqual(.pipe, tokens[2]);
-    try std.testing.expectEqualStrings("bar", tokens[3].identifier);
-    try std.testing.expectEqual(.end, tokens[4]);
+    try std.testing.expectEqual(4, tokens.len);
+    try std.testing.expectEqualStrings("foo", tokens[0].field);
+    try std.testing.expectEqual(.pipe, tokens[1]);
+    try std.testing.expectEqualStrings("bar", tokens[2].identifier);
+    try std.testing.expectEqual(.end, tokens[3]);
 }
 
 test "tokenize comment with CRLF" {
@@ -837,12 +860,11 @@ test "tokenize comment with CRLF" {
     var reader = std.Io.Reader.fixed(".foo # comment\r\n| bar");
     const tokens = try tokenize(allocator.allocator(), &reader);
 
-    try std.testing.expectEqual(5, tokens.len);
-    try std.testing.expectEqual(.dot, tokens[0]);
-    try std.testing.expectEqualStrings("foo", tokens[1].identifier);
-    try std.testing.expectEqual(.pipe, tokens[2]);
-    try std.testing.expectEqualStrings("bar", tokens[3].identifier);
-    try std.testing.expectEqual(.end, tokens[4]);
+    try std.testing.expectEqual(4, tokens.len);
+    try std.testing.expectEqualStrings("foo", tokens[0].field);
+    try std.testing.expectEqual(.pipe, tokens[1]);
+    try std.testing.expectEqualStrings("bar", tokens[2].identifier);
+    try std.testing.expectEqual(.end, tokens[3]);
 }
 
 test "tokenize comment with line continuation before CRLF" {
@@ -852,12 +874,11 @@ test "tokenize comment with line continuation before CRLF" {
     var reader = std.Io.Reader.fixed(".foo # comment \\\r\nthis is also comment\r\n| bar");
     const tokens = try tokenize(allocator.allocator(), &reader);
 
-    try std.testing.expectEqual(5, tokens.len);
-    try std.testing.expectEqual(.dot, tokens[0]);
-    try std.testing.expectEqualStrings("foo", tokens[1].identifier);
-    try std.testing.expectEqual(.pipe, tokens[2]);
-    try std.testing.expectEqualStrings("bar", tokens[3].identifier);
-    try std.testing.expectEqual(.end, tokens[4]);
+    try std.testing.expectEqual(4, tokens.len);
+    try std.testing.expectEqualStrings("foo", tokens[0].field);
+    try std.testing.expectEqual(.pipe, tokens[1]);
+    try std.testing.expectEqualStrings("bar", tokens[2].identifier);
+    try std.testing.expectEqual(.end, tokens[3]);
 }
 
 test "tokenize comment with single CR does not end comment" {
@@ -867,12 +888,11 @@ test "tokenize comment with single CR does not end comment" {
     var reader = std.Io.Reader.fixed(".foo # comment\r| bar\n| baz");
     const tokens = try tokenize(allocator.allocator(), &reader);
 
-    try std.testing.expectEqual(5, tokens.len);
-    try std.testing.expectEqual(.dot, tokens[0]);
-    try std.testing.expectEqualStrings("foo", tokens[1].identifier);
-    try std.testing.expectEqual(.pipe, tokens[2]);
-    try std.testing.expectEqualStrings("baz", tokens[3].identifier);
-    try std.testing.expectEqual(.end, tokens[4]);
+    try std.testing.expectEqual(4, tokens.len);
+    try std.testing.expectEqualStrings("foo", tokens[0].field);
+    try std.testing.expectEqual(.pipe, tokens[1]);
+    try std.testing.expectEqualStrings("baz", tokens[2].identifier);
+    try std.testing.expectEqual(.end, tokens[3]);
 }
 
 test "tokenize floating point numbers" {
@@ -986,12 +1006,11 @@ test "tokenize format in expression" {
     var reader = std.Io.Reader.fixed(".foo | @base64");
     const tokens = try tokenize(allocator.allocator(), &reader);
 
-    try std.testing.expectEqual(5, tokens.len);
-    try std.testing.expectEqual(.dot, tokens[0]);
-    try std.testing.expectEqualStrings("foo", tokens[1].identifier);
-    try std.testing.expectEqual(.pipe, tokens[2]);
-    try std.testing.expectEqualStrings("base64", tokens[3].format);
-    try std.testing.expectEqual(.end, tokens[4]);
+    try std.testing.expectEqual(4, tokens.len);
+    try std.testing.expectEqualStrings("foo", tokens[0].field);
+    try std.testing.expectEqual(.pipe, tokens[1]);
+    try std.testing.expectEqualStrings("base64", tokens[2].format);
+    try std.testing.expectEqual(.end, tokens[3]);
 }
 
 test "tokenize format invalid" {
@@ -1149,4 +1168,60 @@ test "tokenize lone low surrogate" {
     const result = tokenize(allocator.allocator(), &reader);
 
     try std.testing.expectError(error.InvalidUnicodeEscape, result);
+}
+
+test "tokenize field" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed(".foo");
+    const tokens = try tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectEqual(2, tokens.len);
+    try std.testing.expectEqualStrings("foo", tokens[0].field);
+    try std.testing.expectEqual(.end, tokens[1]);
+}
+
+test "tokenize chained fields" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed(".foo.bar.baz");
+    const tokens = try tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectEqual(4, tokens.len);
+    try std.testing.expectEqualStrings("foo", tokens[0].field);
+    try std.testing.expectEqualStrings("bar", tokens[1].field);
+    try std.testing.expectEqualStrings("baz", tokens[2].field);
+    try std.testing.expectEqual(.end, tokens[3]);
+}
+
+test "tokenize field does not support namespace" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    // Unlike identifiers, field access does not support namespace syntax
+    var reader = std.Io.Reader.fixed(".foo::bar");
+    const tokens = try tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectEqual(5, tokens.len);
+    try std.testing.expectEqualStrings("foo", tokens[0].field);
+    try std.testing.expectEqual(.colon, tokens[1]);
+    try std.testing.expectEqual(.colon, tokens[2]);
+    try std.testing.expectEqualStrings("bar", tokens[3].identifier);
+    try std.testing.expectEqual(.end, tokens[4]);
+}
+
+test "tokenize dot with space before identifier" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    // ". foo" should be [dot, identifier("foo")], not [field("foo")]
+    var reader = std.Io.Reader.fixed(". foo");
+    const tokens = try tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectEqual(3, tokens.len);
+    try std.testing.expectEqual(.dot, tokens[0]);
+    try std.testing.expectEqualStrings("foo", tokens[1].identifier);
+    try std.testing.expectEqual(.end, tokens[2]);
 }

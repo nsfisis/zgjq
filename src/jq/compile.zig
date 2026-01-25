@@ -68,9 +68,12 @@ fn compileExpr(allocator: std.mem.Allocator, compile_allocator: std.mem.Allocato
 
     switch (ast.*) {
         .identity => try instrs.append(allocator, .nop),
-        .array_index => |index| {
-            const index_instrs = try compileExpr(allocator, compile_allocator, index);
+        .array_index => |arr_idx| {
+            const base_instrs = try compileExpr(allocator, compile_allocator, arr_idx.base);
+            defer allocator.free(base_instrs);
+            const index_instrs = try compileExpr(allocator, compile_allocator, arr_idx.index);
             defer allocator.free(index_instrs);
+            try instrs.appendSlice(allocator, base_instrs);
             try instrs.append(allocator, .subexp_begin);
             try instrs.appendSlice(allocator, index_instrs);
             try instrs.append(allocator, .subexp_end);

@@ -21,7 +21,86 @@
 * `# ...`: Additional constraints
 
 
-## Grammar
+## Implemented Grammar
+
+```
+program:
+    body
+
+body:
+    query
+
+query:
+    query2
+
+query2:
+    query3 '|' query3
+    query3
+
+query3:
+    expr ',' expr
+    expr
+
+expr:
+    expr2 '//' expr2
+    expr2
+
+expr2:
+    expr3 '=' expr3
+    expr3 '|=' expr3
+    expr3 '//=' expr3
+    expr3 '+=' expr3
+    expr3 '-=' expr3
+    expr3 '*=' expr3
+    expr3 '/=' expr3
+    expr3 '%=' expr3
+    expr3
+
+expr3:
+    expr4 'or' expr4
+    expr4
+
+expr4:
+    expr5 'and' expr5
+    expr5
+
+expr5:
+    expr6 '==' expr6
+    expr6 '!=' expr6
+    expr6 '<' expr6
+    expr6 '>' expr6
+    expr6 '<=' expr6
+    expr6 '>=' expr6
+    expr6
+
+expr6:
+    expr7 '+' expr7
+    expr7 '-' expr7
+    expr7
+
+expr7:
+    term '*' term
+    term '/' term
+    term '%' term
+    term
+
+term:
+    primary { suffix }*
+
+suffix:
+    '[' query ']'
+
+primary:
+    'null'
+    'true'
+    'false'
+    NUMBER
+    '.'
+    FIELD
+```
+
+
+## Complete Grammar
 
 ```
 program:

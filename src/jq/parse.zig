@@ -45,7 +45,7 @@ pub const BinaryOp = enum {
 
 pub const Ast = union(AstKind) {
     identity,
-    array_index: *Ast,
+    array_index: struct { base: *Ast, index: *Ast },
     object_key: []const u8,
     literal: *jv.Value,
     binary_expr: struct { op: BinaryOp, lhs: *Ast, rhs: *Ast },
@@ -300,101 +300,75 @@ fn parseExpr7(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, 
 }
 
 fn parseTerm(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
-    const first_token = try tokens.peek();
-    if (first_token.kind() == .number) {
-        _ = try tokens.next();
-        const number_value = try allocator.create(jv.Value);
-        const f = first_token.number;
-        const i: i64 = @intFromFloat(f);
-        if (@as(f64, @floatFromInt(i)) == f) {
-            number_value.* = .{ .integer = i };
+    var result = try parsePrimary(allocator, parse_allocator, tokens);
+    while (true) {
+        const token = tokens.peek() catch return result;
+        if (token.kind() == .bracket_left) {
+            result = try parseSuffix(allocator, parse_allocator, tokens, result);
         } else {
-            number_value.* = .{ .float = f };
+            break;
         }
-        const number_node = try parse_allocator.create(Ast);
-        number_node.* = .{ .literal = number_value };
-        return number_node;
     }
+    return result;
+}
 
-    if (first_token.kind() == .keyword_null) {
-        _ = try tokens.next();
-        const null_value = try allocator.create(jv.Value);
-        null_value.* = .null;
-        const null_node = try parse_allocator.create(Ast);
-        null_node.* = .{ .literal = null_value };
-        return null_node;
-    }
-
-    if (first_token.kind() == .keyword_true) {
-        _ = try tokens.next();
-        const true_value = try allocator.create(jv.Value);
-        true_value.* = .{ .bool = true };
-        const true_node = try parse_allocator.create(Ast);
-        true_node.* = .{ .literal = true_value };
-        return true_node;
-    }
-
-    if (first_token.kind() == .keyword_false) {
-        _ = try tokens.next();
-        const false_value = try allocator.create(jv.Value);
-        false_value.* = .{ .bool = false };
-        const false_node = try parse_allocator.create(Ast);
-        false_node.* = .{ .literal = false_value };
-        return false_node;
-    }
-
-    _ = try tokens.expect(.dot);
-
-    const next_token = try tokens.peek();
-    switch (next_token.kind()) {
-        .identifier => {
-            return parseFieldAccess(allocator, parse_allocator, tokens);
+fn parsePrimary(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
+    const first_token = try tokens.peek();
+    switch (first_token) {
+        .keyword_null => {
+            _ = try tokens.next();
+            const null_value = try allocator.create(jv.Value);
+            null_value.* = .null;
+            const null_node = try parse_allocator.create(Ast);
+            null_node.* = .{ .literal = null_value };
+            return null_node;
         },
-        .bracket_left => {
-            return parseIndexAccess(allocator, parse_allocator, tokens);
+        .keyword_true => {
+            _ = try tokens.next();
+            const true_value = try allocator.create(jv.Value);
+            true_value.* = .{ .bool = true };
+            const true_node = try parse_allocator.create(Ast);
+            true_node.* = .{ .literal = true_value };
+            return true_node;
         },
-        .end,
-        .pipe,
-        .comma,
-        .slash_slash,
-        .equal,
-        .pipe_equal,
-        .slash_slash_equal,
-        .plus_equal,
-        .minus_equal,
-        .asterisk_equal,
-        .slash_equal,
-        .percent_equal,
-        .keyword_or,
-        .keyword_and,
-        .equal_equal,
-        .not_equal,
-        .less_than,
-        .greater_than,
-        .less_than_equal,
-        .greater_than_equal,
-        .plus,
-        .minus,
-        .asterisk,
-        .slash,
-        .percent,
-        => {
+        .keyword_false => {
+            _ = try tokens.next();
+            const false_value = try allocator.create(jv.Value);
+            false_value.* = .{ .bool = false };
+            const false_node = try parse_allocator.create(Ast);
+            false_node.* = .{ .literal = false_value };
+            return false_node;
+        },
+        .number => |f| {
+            _ = try tokens.next();
+            const number_value = try allocator.create(jv.Value);
+            const i: i64 = @intFromFloat(f);
+            if (@as(f64, @floatFromInt(i)) == f) {
+                number_value.* = .{ .integer = i };
+            } else {
+                number_value.* = .{ .float = f };
+            }
+            const number_node = try parse_allocator.create(Ast);
+            number_node.* = .{ .literal = number_value };
+            return number_node;
+        },
+        .dot => {
+            _ = try tokens.next();
             const ast = try parse_allocator.create(Ast);
             ast.* = .identity;
+            return ast;
+        },
+        .field => |name| {
+            _ = try tokens.next();
+            const ast = try parse_allocator.create(Ast);
+            ast.* = .{ .object_key = try allocator.dupe(u8, name) };
             return ast;
         },
         else => return error.InvalidQuery,
     }
 }
 
-fn parseFieldAccess(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
-    const token = try tokens.expect(.identifier);
-    const ast = try parse_allocator.create(Ast);
-    ast.* = .{ .object_key = try allocator.dupe(u8, token.identifier) };
-    return ast;
-}
-
-fn parseIndexAccess(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
+fn parseSuffix(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream, base: *Ast) !*Ast {
     _ = try tokens.expect(.bracket_left);
     const index_token = try tokens.expect(.number);
     _ = try tokens.expect(.bracket_right);
@@ -403,7 +377,8 @@ fn parseIndexAccess(allocator: std.mem.Allocator, parse_allocator: std.mem.Alloc
     index_value.* = .{ .integer = @intFromFloat(index_token.number) };
     const index_node = try parse_allocator.create(Ast);
     index_node.* = .{ .literal = index_value };
+
     const ast = try parse_allocator.create(Ast);
-    ast.* = .{ .array_index = index_node };
+    ast.* = .{ .array_index = .{ .base = base, .index = index_node } };
     return ast;
 }
