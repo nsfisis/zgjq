@@ -2,7 +2,7 @@ const std = @import("std");
 const jv = @import("../jv.zig");
 const Token = @import("./tokenize.zig").Token;
 const TokenKind = @import("./tokenize.zig").TokenKind;
-const ConstIndex = @import("./compile.zig").ConstIndex;
+const ConstIndex = @import("./codegen.zig").ConstIndex;
 
 pub const ParseError = error{
     UnexpectedEnd,
@@ -112,7 +112,7 @@ const Parser = struct {
     const Error = ParseError || std.mem.Allocator.Error;
 
     allocator: std.mem.Allocator,
-    parse_allocator: std.mem.Allocator,
+    compile_allocator: std.mem.Allocator,
     tokens: *TokenStream,
     constants: *std.ArrayList(jv.Value),
 
@@ -132,7 +132,7 @@ const Parser = struct {
         var lhs = try self.parseQuery3();
         while (self.tokens.consumeIf(.pipe)) {
             const rhs = try self.parseQuery3();
-            const ast = try self.parse_allocator.create(Ast);
+            const ast = try self.compile_allocator.create(Ast);
             ast.* = .{ .pipe = .{
                 .lhs = lhs,
                 .rhs = rhs,
@@ -147,7 +147,7 @@ const Parser = struct {
         var lhs = try self.parseExpr();
         while (self.tokens.consumeIf(.comma)) {
             const rhs = try self.parseExpr();
-            const ast = try self.parse_allocator.create(Ast);
+            const ast = try self.compile_allocator.create(Ast);
             ast.* = .{ .comma = .{
                 .lhs = lhs,
                 .rhs = rhs,
@@ -161,7 +161,7 @@ const Parser = struct {
         var lhs = try self.parseExpr2();
         while (self.tokens.consumeIf(.slash_slash)) {
             const rhs = try self.parseExpr2();
-            const ast = try self.parse_allocator.create(Ast);
+            const ast = try self.compile_allocator.create(Ast);
             ast.* = .{ .binary_expr = .{
                 .op = .alt,
                 .lhs = lhs,
@@ -188,7 +188,7 @@ const Parser = struct {
         };
         _ = try self.tokens.next();
         const rhs = try self.parseExpr3();
-        const ast = try self.parse_allocator.create(Ast);
+        const ast = try self.compile_allocator.create(Ast);
         ast.* = .{ .binary_expr = .{
             .op = op,
             .lhs = lhs,
@@ -203,7 +203,7 @@ const Parser = struct {
             return lhs;
         }
         const rhs = try self.parseExpr4();
-        const ast = try self.parse_allocator.create(Ast);
+        const ast = try self.compile_allocator.create(Ast);
         ast.* = .{ .or_expr = .{
             .lhs = lhs,
             .rhs = rhs,
@@ -217,7 +217,7 @@ const Parser = struct {
             return lhs;
         }
         const rhs = try self.parseExpr5();
-        const ast = try self.parse_allocator.create(Ast);
+        const ast = try self.compile_allocator.create(Ast);
         ast.* = .{ .and_expr = .{
             .lhs = lhs,
             .rhs = rhs,
@@ -239,7 +239,7 @@ const Parser = struct {
         };
         _ = try self.tokens.next();
         const rhs = try self.parseExpr6();
-        const ast = try self.parse_allocator.create(Ast);
+        const ast = try self.compile_allocator.create(Ast);
         ast.* = .{ .binary_expr = .{
             .op = op,
             .lhs = lhs,
@@ -259,7 +259,7 @@ const Parser = struct {
             };
             _ = try self.tokens.next();
             const rhs = try self.parseExpr7();
-            const ast = try self.parse_allocator.create(Ast);
+            const ast = try self.compile_allocator.create(Ast);
             ast.* = .{ .binary_expr = .{
                 .op = op,
                 .lhs = lhs,
@@ -281,7 +281,7 @@ const Parser = struct {
             };
             _ = try self.tokens.next();
             const rhs = try self.parseTerm();
-            const ast = try self.parse_allocator.create(Ast);
+            const ast = try self.compile_allocator.create(Ast);
             ast.* = .{ .binary_expr = .{
                 .op = op,
                 .lhs = lhs,
@@ -311,7 +311,7 @@ const Parser = struct {
                 _ = try self.tokens.next();
                 try self.constants.append(self.allocator, .null);
                 const idx: ConstIndex = @enumFromInt(self.constants.items.len - 1);
-                const null_node = try self.parse_allocator.create(Ast);
+                const null_node = try self.compile_allocator.create(Ast);
                 null_node.* = .{ .literal = idx };
                 return null_node;
             },
@@ -319,7 +319,7 @@ const Parser = struct {
                 _ = try self.tokens.next();
                 try self.constants.append(self.allocator, .{ .bool = true });
                 const idx: ConstIndex = @enumFromInt(self.constants.items.len - 1);
-                const true_node = try self.parse_allocator.create(Ast);
+                const true_node = try self.compile_allocator.create(Ast);
                 true_node.* = .{ .literal = idx };
                 return true_node;
             },
@@ -327,7 +327,7 @@ const Parser = struct {
                 _ = try self.tokens.next();
                 try self.constants.append(self.allocator, .{ .bool = false });
                 const idx: ConstIndex = @enumFromInt(self.constants.items.len - 1);
-                const false_node = try self.parse_allocator.create(Ast);
+                const false_node = try self.compile_allocator.create(Ast);
                 false_node.* = .{ .literal = idx };
                 return false_node;
             },
@@ -340,7 +340,7 @@ const Parser = struct {
                     try self.constants.append(self.allocator, .{ .float = f });
                 }
                 const idx: ConstIndex = @enumFromInt(self.constants.items.len - 1);
-                const number_node = try self.parse_allocator.create(Ast);
+                const number_node = try self.compile_allocator.create(Ast);
                 number_node.* = .{ .literal = idx };
                 return number_node;
             },
@@ -348,13 +348,13 @@ const Parser = struct {
                 _ = try self.tokens.next();
                 try self.constants.append(self.allocator, .{ .string = try self.allocator.dupe(u8, s) });
                 const idx: ConstIndex = @enumFromInt(self.constants.items.len - 1);
-                const string_node = try self.parse_allocator.create(Ast);
+                const string_node = try self.compile_allocator.create(Ast);
                 string_node.* = .{ .literal = idx };
                 return string_node;
             },
             .dot => {
                 _ = try self.tokens.next();
-                const ast = try self.parse_allocator.create(Ast);
+                const ast = try self.compile_allocator.create(Ast);
                 ast.* = .identity;
                 return ast;
             },
@@ -363,7 +363,7 @@ const Parser = struct {
                 _ = try self.tokens.expect(.bracket_right);
                 try self.constants.append(self.allocator, .{ .array = jv.Array.init(self.allocator) });
                 const idx: ConstIndex = @enumFromInt(self.constants.items.len - 1);
-                const array_node = try self.parse_allocator.create(Ast);
+                const array_node = try self.compile_allocator.create(Ast);
                 array_node.* = .{ .literal = idx };
                 return array_node;
             },
@@ -372,20 +372,20 @@ const Parser = struct {
                 _ = try self.tokens.expect(.brace_right);
                 try self.constants.append(self.allocator, .{ .object = jv.Object.init(self.allocator) });
                 const idx: ConstIndex = @enumFromInt(self.constants.items.len - 1);
-                const object_node = try self.parse_allocator.create(Ast);
+                const object_node = try self.compile_allocator.create(Ast);
                 object_node.* = .{ .literal = idx };
                 return object_node;
             },
             .field => |name| {
                 _ = try self.tokens.next();
                 const is_optional = self.tokens.consumeIf(.question);
-                const base_ast = try self.parse_allocator.create(Ast);
+                const base_ast = try self.compile_allocator.create(Ast);
                 base_ast.* = .identity;
                 try self.constants.append(self.allocator, .{ .string = try self.allocator.dupe(u8, name) });
                 const idx: ConstIndex = @enumFromInt(self.constants.items.len - 1);
-                const key_ast = try self.parse_allocator.create(Ast);
+                const key_ast = try self.compile_allocator.create(Ast);
                 key_ast.* = .{ .literal = idx };
-                const ast = try self.parse_allocator.create(Ast);
+                const ast = try self.compile_allocator.create(Ast);
                 ast.* = .{ .index = .{ .base = base_ast, .index = key_ast, .is_optional = is_optional } };
                 return ast;
             },
@@ -400,17 +400,17 @@ const Parser = struct {
 
         const is_optional = self.tokens.consumeIf(.question);
 
-        const ast = try self.parse_allocator.create(Ast);
+        const ast = try self.compile_allocator.create(Ast);
         ast.* = .{ .index = .{ .base = base, .index = index_expr, .is_optional = is_optional } };
         return ast;
     }
 };
 
-pub fn parse(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: []const Token, constants: *std.ArrayList(jv.Value)) !*Ast {
+pub fn parse(allocator: std.mem.Allocator, compile_allocator: std.mem.Allocator, tokens: []const Token, constants: *std.ArrayList(jv.Value)) !*Ast {
     var token_stream = TokenStream.init(tokens);
     var parser = Parser{
         .allocator = allocator,
-        .parse_allocator = parse_allocator,
+        .compile_allocator = compile_allocator,
         .tokens = &token_stream,
         .constants = constants,
     };

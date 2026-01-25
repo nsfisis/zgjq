@@ -2,8 +2,8 @@ const std = @import("std");
 const jv = @import("../jv.zig");
 const tokenize = @import("./tokenize.zig").tokenize;
 const parse = @import("./parse.zig").parse;
-const Instr = @import("./compile.zig").Instr;
-const compile = @import("./compile.zig").compile;
+const Instr = @import("./codegen.zig").Instr;
+const codegen = @import("./codegen.zig").codegen;
 
 pub const ExecuteError = error{
     Unimplemented,
@@ -148,7 +148,7 @@ pub const Runtime = struct {
         defer compile_allocator.deinit();
         const tokens = try tokenize(compile_allocator.allocator(), reader);
         const ast = try parse(self.allocator, compile_allocator.allocator(), tokens, &self.constants);
-        const instrs = try compile(self.allocator, compile_allocator.allocator(), ast);
+        const instrs = try codegen(self.allocator, ast);
         self.instrs = instrs;
         // std.debug.print("BEGIN\n", .{});
         // for (self.instrs) |instr| {
