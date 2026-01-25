@@ -113,6 +113,7 @@ pub const Runtime = struct {
     forks: std.ArrayList(usize),
     instrs: []const Instr,
     pc: usize,
+    constants: std.ArrayList(jv.Value),
 
     pub fn init(allocator: std.mem.Allocator) !Self {
         return .{
@@ -121,10 +122,21 @@ pub const Runtime = struct {
             .forks = .{},
             .instrs = &[_]Instr{},
             .pc = 0,
+            .constants = .{},
         };
     }
 
     pub fn deinit(self: *Self) void {
+        for (self.constants.items) |*value| {
+            switch (value.*) {
+                .string => |s| self.allocator.free(s),
+                .array => |*a| a.deinit(),
+                .object => |*o| o.deinit(),
+                else => {},
+            }
+        }
+        self.constants.deinit(self.allocator);
+
         for (self.instrs) |instr| {
             instr.deinit(self.allocator);
         }
@@ -140,7 +152,7 @@ pub const Runtime = struct {
         var compile_allocator = std.heap.ArenaAllocator.init(self.allocator);
         defer compile_allocator.deinit();
         const tokens = try tokenize(compile_allocator.allocator(), reader);
-        const ast = try parse(self.allocator, compile_allocator.allocator(), tokens);
+        const ast = try parse(self.allocator, compile_allocator.allocator(), tokens, &self.constants);
         const instrs = try compile(self.allocator, compile_allocator.allocator(), ast);
         self.instrs = instrs;
         // std.debug.print("BEGIN\n", .{});
@@ -295,11 +307,11 @@ pub const Runtime = struct {
                     const result = obj.get(key) orelse .null;
                     try self.values.push(result);
                 },
-                .literal => |value| {
+                .@"const" => |idx| {
                     std.debug.assert(self.values.ensureSize(1));
 
                     _ = self.values.pop();
-                    try self.values.push(value.*);
+                    try self.values.push(self.constants.items[@intFromEnum(idx)]);
                 },
             }
         }

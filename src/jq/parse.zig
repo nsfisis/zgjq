@@ -2,6 +2,7 @@ const std = @import("std");
 const jv = @import("../jv.zig");
 const Token = @import("./tokenize.zig").Token;
 const TokenKind = @import("./tokenize.zig").TokenKind;
+const ConstIndex = @import("./compile.zig").ConstIndex;
 
 pub const ParseError = error{
     UnexpectedEnd,
@@ -47,7 +48,7 @@ pub const Ast = union(AstKind) {
     identity,
     array_index: struct { base: *Ast, index: *Ast },
     object_key: []const u8,
-    literal: *jv.Value,
+    literal: ConstIndex,
     binary_expr: struct { op: BinaryOp, lhs: *Ast, rhs: *Ast },
     pipe: struct { lhs: *Ast, rhs: *Ast },
     comma: struct { lhs: *Ast, rhs: *Ast },
@@ -95,30 +96,30 @@ pub const TokenStream = struct {
     }
 };
 
-pub fn parse(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: []const Token) !*Ast {
+pub fn parse(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: []const Token, constants: *std.ArrayList(jv.Value)) !*Ast {
     var token_stream = TokenStream.init(tokens);
-    return parseQuery(allocator, parse_allocator, &token_stream);
+    return parseQuery(allocator, parse_allocator, &token_stream, constants);
 }
 
-fn parseProgram(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
-    return parseBody(allocator, parse_allocator, tokens);
+fn parseProgram(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream, constants: *std.ArrayList(jv.Value)) !*Ast {
+    return parseBody(allocator, parse_allocator, tokens, constants);
 }
 
-fn parseBody(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
-    return parseQuery(allocator, parse_allocator, tokens);
+fn parseBody(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream, constants: *std.ArrayList(jv.Value)) !*Ast {
+    return parseQuery(allocator, parse_allocator, tokens, constants);
 }
 
-fn parseQuery(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
-    return parseQuery2(allocator, parse_allocator, tokens);
+fn parseQuery(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream, constants: *std.ArrayList(jv.Value)) !*Ast {
+    return parseQuery2(allocator, parse_allocator, tokens, constants);
 }
 
-fn parseQuery2(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
-    var lhs = try parseQuery3(allocator, parse_allocator, tokens);
+fn parseQuery2(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream, constants: *std.ArrayList(jv.Value)) !*Ast {
+    var lhs = try parseQuery3(allocator, parse_allocator, tokens, constants);
     while (true) {
         const token = tokens.peek() catch break;
         if (token.kind() == .pipe) {
             _ = try tokens.next();
-            const rhs = try parseQuery3(allocator, parse_allocator, tokens);
+            const rhs = try parseQuery3(allocator, parse_allocator, tokens, constants);
             const ast = try parse_allocator.create(Ast);
             ast.* = .{ .pipe = .{
                 .lhs = lhs,
@@ -133,13 +134,13 @@ fn parseQuery2(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator,
     return lhs;
 }
 
-fn parseQuery3(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
-    var lhs = try parseExpr(allocator, parse_allocator, tokens);
+fn parseQuery3(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream, constants: *std.ArrayList(jv.Value)) !*Ast {
+    var lhs = try parseExpr(allocator, parse_allocator, tokens, constants);
     while (true) {
         const token = tokens.peek() catch return lhs;
         if (token.kind() == .comma) {
             _ = try tokens.next();
-            const rhs = try parseExpr(allocator, parse_allocator, tokens);
+            const rhs = try parseExpr(allocator, parse_allocator, tokens, constants);
             const ast = try parse_allocator.create(Ast);
             ast.* = .{ .comma = .{
                 .lhs = lhs,
@@ -153,13 +154,13 @@ fn parseQuery3(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator,
     return lhs;
 }
 
-fn parseExpr(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
-    var lhs = try parseExpr2(allocator, parse_allocator, tokens);
+fn parseExpr(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream, constants: *std.ArrayList(jv.Value)) !*Ast {
+    var lhs = try parseExpr2(allocator, parse_allocator, tokens, constants);
     while (true) {
         const token = try tokens.peek();
         if (token.kind() == .slash_slash) {
             _ = try tokens.next();
-            const rhs = try parseExpr2(allocator, parse_allocator, tokens);
+            const rhs = try parseExpr2(allocator, parse_allocator, tokens, constants);
             const ast = try parse_allocator.create(Ast);
             ast.* = .{ .binary_expr = .{
                 .op = .alt,
@@ -174,8 +175,8 @@ fn parseExpr(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, t
     return lhs;
 }
 
-fn parseExpr2(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
-    const lhs = try parseExpr3(allocator, parse_allocator, tokens);
+fn parseExpr2(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream, constants: *std.ArrayList(jv.Value)) !*Ast {
+    const lhs = try parseExpr3(allocator, parse_allocator, tokens, constants);
     const token = tokens.peek() catch return lhs;
     const op: BinaryOp = switch (token.kind()) {
         .equal => .assign,
@@ -189,7 +190,7 @@ fn parseExpr2(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, 
         else => return lhs,
     };
     _ = try tokens.next();
-    const rhs = try parseExpr3(allocator, parse_allocator, tokens);
+    const rhs = try parseExpr3(allocator, parse_allocator, tokens, constants);
     const ast = try parse_allocator.create(Ast);
     ast.* = .{ .binary_expr = .{
         .op = op,
@@ -199,14 +200,14 @@ fn parseExpr2(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, 
     return ast;
 }
 
-fn parseExpr3(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
-    const lhs = try parseExpr4(allocator, parse_allocator, tokens);
+fn parseExpr3(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream, constants: *std.ArrayList(jv.Value)) !*Ast {
+    const lhs = try parseExpr4(allocator, parse_allocator, tokens, constants);
     const token = tokens.peek() catch return lhs;
     if (token.kind() != .keyword_or) {
         return lhs;
     }
     _ = try tokens.next();
-    const rhs = try parseExpr4(allocator, parse_allocator, tokens);
+    const rhs = try parseExpr4(allocator, parse_allocator, tokens, constants);
     const ast = try parse_allocator.create(Ast);
     ast.* = .{ .binary_expr = .{
         .op = .@"or",
@@ -216,14 +217,14 @@ fn parseExpr3(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, 
     return ast;
 }
 
-fn parseExpr4(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
-    const lhs = try parseExpr5(allocator, parse_allocator, tokens);
+fn parseExpr4(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream, constants: *std.ArrayList(jv.Value)) !*Ast {
+    const lhs = try parseExpr5(allocator, parse_allocator, tokens, constants);
     const token = tokens.peek() catch return lhs;
     if (token.kind() != .keyword_and) {
         return lhs;
     }
     _ = try tokens.next();
-    const rhs = try parseExpr5(allocator, parse_allocator, tokens);
+    const rhs = try parseExpr5(allocator, parse_allocator, tokens, constants);
     const ast = try parse_allocator.create(Ast);
     ast.* = .{ .binary_expr = .{
         .op = .@"and",
@@ -233,8 +234,8 @@ fn parseExpr4(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, 
     return ast;
 }
 
-fn parseExpr5(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
-    const lhs = try parseExpr6(allocator, parse_allocator, tokens);
+fn parseExpr5(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream, constants: *std.ArrayList(jv.Value)) !*Ast {
+    const lhs = try parseExpr6(allocator, parse_allocator, tokens, constants);
     const token = tokens.peek() catch return lhs;
     const op: BinaryOp = switch (token.kind()) {
         .equal_equal => .eq,
@@ -246,7 +247,7 @@ fn parseExpr5(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, 
         else => return lhs,
     };
     _ = try tokens.next();
-    const rhs = try parseExpr6(allocator, parse_allocator, tokens);
+    const rhs = try parseExpr6(allocator, parse_allocator, tokens, constants);
     const ast = try parse_allocator.create(Ast);
     ast.* = .{ .binary_expr = .{
         .op = op,
@@ -256,8 +257,8 @@ fn parseExpr5(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, 
     return ast;
 }
 
-fn parseExpr6(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
-    var lhs = try parseExpr7(allocator, parse_allocator, tokens);
+fn parseExpr6(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream, constants: *std.ArrayList(jv.Value)) !*Ast {
+    var lhs = try parseExpr7(allocator, parse_allocator, tokens, constants);
     while (true) {
         const token = tokens.peek() catch return lhs;
         const op: BinaryOp = switch (token.kind()) {
@@ -266,7 +267,7 @@ fn parseExpr6(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, 
             else => return lhs,
         };
         _ = try tokens.next();
-        const rhs = try parseExpr7(allocator, parse_allocator, tokens);
+        const rhs = try parseExpr7(allocator, parse_allocator, tokens, constants);
         const ast = try parse_allocator.create(Ast);
         ast.* = .{ .binary_expr = .{
             .op = op,
@@ -277,8 +278,8 @@ fn parseExpr6(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, 
     }
 }
 
-fn parseExpr7(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
-    var lhs = try parseTerm(allocator, parse_allocator, tokens);
+fn parseExpr7(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream, constants: *std.ArrayList(jv.Value)) !*Ast {
+    var lhs = try parseTerm(allocator, parse_allocator, tokens, constants);
     while (true) {
         const token = tokens.peek() catch return lhs;
         const op: BinaryOp = switch (token.kind()) {
@@ -288,7 +289,7 @@ fn parseExpr7(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, 
             else => return lhs,
         };
         _ = try tokens.next();
-        const rhs = try parseTerm(allocator, parse_allocator, tokens);
+        const rhs = try parseTerm(allocator, parse_allocator, tokens, constants);
         const ast = try parse_allocator.create(Ast);
         ast.* = .{ .binary_expr = .{
             .op = op,
@@ -299,12 +300,12 @@ fn parseExpr7(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, 
     }
 }
 
-fn parseTerm(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
-    var result = try parsePrimary(allocator, parse_allocator, tokens);
+fn parseTerm(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream, constants: *std.ArrayList(jv.Value)) !*Ast {
+    var result = try parsePrimary(allocator, parse_allocator, tokens, constants);
     while (true) {
         const token = tokens.peek() catch return result;
         if (token.kind() == .bracket_left) {
-            result = try parseSuffix(allocator, parse_allocator, tokens, result);
+            result = try parseSuffix(allocator, parse_allocator, tokens, constants, result);
         } else {
             break;
         }
@@ -312,52 +313,52 @@ fn parseTerm(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, t
     return result;
 }
 
-fn parsePrimary(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream) !*Ast {
+fn parsePrimary(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream, constants: *std.ArrayList(jv.Value)) !*Ast {
     const first_token = try tokens.peek();
     switch (first_token) {
         .keyword_null => {
             _ = try tokens.next();
-            const null_value = try allocator.create(jv.Value);
-            null_value.* = .null;
+            try constants.append(allocator, .null);
+            const idx: ConstIndex = @enumFromInt(constants.items.len - 1);
             const null_node = try parse_allocator.create(Ast);
-            null_node.* = .{ .literal = null_value };
+            null_node.* = .{ .literal = idx };
             return null_node;
         },
         .keyword_true => {
             _ = try tokens.next();
-            const true_value = try allocator.create(jv.Value);
-            true_value.* = .{ .bool = true };
+            try constants.append(allocator, .{ .bool = true });
+            const idx: ConstIndex = @enumFromInt(constants.items.len - 1);
             const true_node = try parse_allocator.create(Ast);
-            true_node.* = .{ .literal = true_value };
+            true_node.* = .{ .literal = idx };
             return true_node;
         },
         .keyword_false => {
             _ = try tokens.next();
-            const false_value = try allocator.create(jv.Value);
-            false_value.* = .{ .bool = false };
+            try constants.append(allocator, .{ .bool = false });
+            const idx: ConstIndex = @enumFromInt(constants.items.len - 1);
             const false_node = try parse_allocator.create(Ast);
-            false_node.* = .{ .literal = false_value };
+            false_node.* = .{ .literal = idx };
             return false_node;
         },
         .number => |f| {
             _ = try tokens.next();
-            const number_value = try allocator.create(jv.Value);
             const i: i64 = @intFromFloat(f);
             if (@as(f64, @floatFromInt(i)) == f) {
-                number_value.* = .{ .integer = i };
+                try constants.append(allocator, .{ .integer = i });
             } else {
-                number_value.* = .{ .float = f };
+                try constants.append(allocator, .{ .float = f });
             }
+            const idx: ConstIndex = @enumFromInt(constants.items.len - 1);
             const number_node = try parse_allocator.create(Ast);
-            number_node.* = .{ .literal = number_value };
+            number_node.* = .{ .literal = idx };
             return number_node;
         },
         .string => |s| {
             _ = try tokens.next();
-            const string_value = try allocator.create(jv.Value);
-            string_value.* = .{ .string = try allocator.dupe(u8, s) };
+            try constants.append(allocator, .{ .string = try allocator.dupe(u8, s) });
+            const idx: ConstIndex = @enumFromInt(constants.items.len - 1);
             const string_node = try parse_allocator.create(Ast);
-            string_node.* = .{ .literal = string_value };
+            string_node.* = .{ .literal = idx };
             return string_node;
         },
         .dot => {
@@ -369,19 +370,19 @@ fn parsePrimary(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator
         .bracket_left => {
             _ = try tokens.next();
             _ = try tokens.expect(.bracket_right);
-            const array_value = try allocator.create(jv.Value);
-            array_value.* = .{ .array = jv.Array.init(allocator) };
+            try constants.append(allocator, .{ .array = jv.Array.init(allocator) });
+            const idx: ConstIndex = @enumFromInt(constants.items.len - 1);
             const array_node = try parse_allocator.create(Ast);
-            array_node.* = .{ .literal = array_value };
+            array_node.* = .{ .literal = idx };
             return array_node;
         },
         .brace_left => {
             _ = try tokens.next();
             _ = try tokens.expect(.brace_right);
-            const object_value = try allocator.create(jv.Value);
-            object_value.* = .{ .object = jv.Object.init(allocator) };
+            try constants.append(allocator, .{ .object = jv.Object.init(allocator) });
+            const idx: ConstIndex = @enumFromInt(constants.items.len - 1);
             const object_node = try parse_allocator.create(Ast);
-            object_node.* = .{ .literal = object_value };
+            object_node.* = .{ .literal = idx };
             return object_node;
         },
         .field => |name| {
@@ -394,15 +395,15 @@ fn parsePrimary(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator
     }
 }
 
-fn parseSuffix(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream, base: *Ast) !*Ast {
+fn parseSuffix(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, tokens: *TokenStream, constants: *std.ArrayList(jv.Value), base: *Ast) !*Ast {
     _ = try tokens.expect(.bracket_left);
     const index_token = try tokens.expect(.number);
     _ = try tokens.expect(.bracket_right);
 
-    const index_value = try allocator.create(jv.Value);
-    index_value.* = .{ .integer = @intFromFloat(index_token.number) };
+    try constants.append(allocator, .{ .integer = @intFromFloat(index_token.number) });
+    const idx: ConstIndex = @enumFromInt(constants.items.len - 1);
     const index_node = try parse_allocator.create(Ast);
-    index_node.* = .{ .literal = index_value };
+    index_node.* = .{ .literal = idx };
 
     const ast = try parse_allocator.create(Ast);
     ast.* = .{ .array_index = .{ .base = base, .index = index_node } };

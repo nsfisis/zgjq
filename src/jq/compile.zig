@@ -3,6 +3,8 @@ const jv = @import("../jv.zig");
 const Ast = @import("./parse.zig").Ast;
 const BinaryOp = @import("./parse.zig").BinaryOp;
 
+pub const ConstIndex = enum(u32) { _ };
+
 pub const Opcode = enum {
     nop,
     ret,
@@ -23,7 +25,7 @@ pub const Opcode = enum {
     le,
     ge,
     object_key,
-    literal,
+    @"const",
 };
 
 pub const Instr = union(Opcode) {
@@ -48,7 +50,7 @@ pub const Instr = union(Opcode) {
     le,
     ge,
     object_key: []const u8,
-    literal: *jv.Value,
+    @"const": ConstIndex,
 
     pub fn op(self: Self) Opcode {
         return self;
@@ -57,12 +59,6 @@ pub const Instr = union(Opcode) {
     pub fn deinit(self: Self, allocator: std.mem.Allocator) void {
         switch (self) {
             .object_key => |key| allocator.free(key),
-            .literal => |value| {
-                if (value.* == .string) {
-                    allocator.free(value.string);
-                }
-                allocator.destroy(value);
-            },
             else => {},
         }
     }
@@ -85,7 +81,7 @@ fn compileExpr(allocator: std.mem.Allocator, compile_allocator: std.mem.Allocato
             try instrs.append(allocator, .array_index);
         },
         .object_key => |key| try instrs.append(allocator, .{ .object_key = key }),
-        .literal => |value| try instrs.append(allocator, .{ .literal = value }),
+        .literal => |idx| try instrs.append(allocator, .{ .@"const" = idx }),
         .binary_expr => |binary_expr| {
             const rhs_instrs = try compileExpr(allocator, compile_allocator, binary_expr.rhs);
             defer allocator.free(rhs_instrs);
