@@ -107,25 +107,26 @@ const TokenStream = struct {
 
 const Parser = struct {
     const Self = @This();
+    const Error = ParseError || std.mem.Allocator.Error;
 
     allocator: std.mem.Allocator,
     parse_allocator: std.mem.Allocator,
     tokens: *TokenStream,
     constants: *std.ArrayList(jv.Value),
 
-    fn parseProgram(self: *Self) !*Ast {
+    fn parseProgram(self: *Self) Error!*Ast {
         return self.parseBody();
     }
 
-    fn parseBody(self: *Self) !*Ast {
+    fn parseBody(self: *Self) Error!*Ast {
         return self.parseQuery();
     }
 
-    fn parseQuery(self: *Self) !*Ast {
+    fn parseQuery(self: *Self) Error!*Ast {
         return self.parseQuery2();
     }
 
-    fn parseQuery2(self: *Self) !*Ast {
+    fn parseQuery2(self: *Self) Error!*Ast {
         var lhs = try self.parseQuery3();
         while (self.tokens.consumeIf(.pipe)) {
             const rhs = try self.parseQuery3();
@@ -140,7 +141,7 @@ const Parser = struct {
         return lhs;
     }
 
-    fn parseQuery3(self: *Self) !*Ast {
+    fn parseQuery3(self: *Self) Error!*Ast {
         var lhs = try self.parseExpr();
         while (self.tokens.consumeIf(.comma)) {
             const rhs = try self.parseExpr();
@@ -154,7 +155,7 @@ const Parser = struct {
         return lhs;
     }
 
-    fn parseExpr(self: *Self) !*Ast {
+    fn parseExpr(self: *Self) Error!*Ast {
         var lhs = try self.parseExpr2();
         while (self.tokens.consumeIf(.slash_slash)) {
             const rhs = try self.parseExpr2();
@@ -169,7 +170,7 @@ const Parser = struct {
         return lhs;
     }
 
-    fn parseExpr2(self: *Self) !*Ast {
+    fn parseExpr2(self: *Self) Error!*Ast {
         const lhs = try self.parseExpr3();
         const token = self.tokens.peek() catch return lhs;
         const op: BinaryOp = switch (token.kind()) {
@@ -194,7 +195,7 @@ const Parser = struct {
         return ast;
     }
 
-    fn parseExpr3(self: *Self) !*Ast {
+    fn parseExpr3(self: *Self) Error!*Ast {
         const lhs = try self.parseExpr4();
         if (!self.tokens.consumeIf(.keyword_or)) {
             return lhs;
@@ -209,7 +210,7 @@ const Parser = struct {
         return ast;
     }
 
-    fn parseExpr4(self: *Self) !*Ast {
+    fn parseExpr4(self: *Self) Error!*Ast {
         const lhs = try self.parseExpr5();
         if (!self.tokens.consumeIf(.keyword_and)) {
             return lhs;
@@ -224,7 +225,7 @@ const Parser = struct {
         return ast;
     }
 
-    fn parseExpr5(self: *Self) !*Ast {
+    fn parseExpr5(self: *Self) Error!*Ast {
         const lhs = try self.parseExpr6();
         const token = self.tokens.peek() catch return lhs;
         const op: BinaryOp = switch (token.kind()) {
@@ -247,7 +248,7 @@ const Parser = struct {
         return ast;
     }
 
-    fn parseExpr6(self: *Self) !*Ast {
+    fn parseExpr6(self: *Self) Error!*Ast {
         var lhs = try self.parseExpr7();
         while (true) {
             const token = self.tokens.peek() catch return lhs;
@@ -268,7 +269,7 @@ const Parser = struct {
         }
     }
 
-    fn parseExpr7(self: *Self) !*Ast {
+    fn parseExpr7(self: *Self) Error!*Ast {
         var lhs = try self.parseTerm();
         while (true) {
             const token = self.tokens.peek() catch return lhs;
@@ -290,7 +291,7 @@ const Parser = struct {
         }
     }
 
-    fn parseTerm(self: *Self) !*Ast {
+    fn parseTerm(self: *Self) Error!*Ast {
         var result = try self.parsePrimary();
         while (true) {
             const token = self.tokens.peek() catch return result;
@@ -303,7 +304,7 @@ const Parser = struct {
         return result;
     }
 
-    fn parsePrimary(self: *Self) !*Ast {
+    fn parsePrimary(self: *Self) Error!*Ast {
         const first_token = try self.tokens.peek();
         switch (first_token) {
             .keyword_null => {
@@ -392,20 +393,15 @@ const Parser = struct {
         }
     }
 
-    fn parseSuffix(self: *Self, base: *Ast) !*Ast {
+    fn parseSuffix(self: *Self, base: *Ast) Error!*Ast {
         _ = try self.tokens.expect(.bracket_left);
-        const index_token = try self.tokens.expect(.number);
+        const index_expr = try self.parseExpr();
         _ = try self.tokens.expect(.bracket_right);
 
         const is_optional = self.tokens.consumeIf(.question);
 
-        try self.constants.append(self.allocator, .{ .integer = @intFromFloat(index_token.number) });
-        const idx: ConstIndex = @enumFromInt(self.constants.items.len - 1);
-        const index_node = try self.parse_allocator.create(Ast);
-        index_node.* = .{ .literal = idx };
-
         const ast = try self.parse_allocator.create(Ast);
-        ast.* = .{ .index = .{ .base = base, .index = index_node, .is_optional = is_optional } };
+        ast.* = .{ .index = .{ .base = base, .index = index_expr, .is_optional = is_optional } };
         return ast;
     }
 };

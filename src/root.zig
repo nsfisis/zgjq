@@ -65,7 +65,7 @@ test "identity filter" {
     try testRun("{\"a\":123}", "{\"a\":123}", ".");
 }
 
-test "array index filter" {
+test "index access" {
     try testRun("null", "[]", ".[0]");
     try testRun("1", "[1,2,3]", ".[0]");
     try testRun("null", "[1,2,3]", ".[5]");
@@ -77,14 +77,23 @@ test "array index filter" {
         \\ 61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,
         \\ 81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100]
     , ".[100]");
-}
 
-test "object key filter" {
     try testRun("123", "{\"a\":123}", ".a");
     try testRun("null", "{\"a\":123}", ".b");
     try testRun("\"hello\"", "{\"foo\":\"hello\"}", ".foo");
     try testRun("[1,2,3]", "{\"arr\":[1,2,3]}", ".arr");
     try testRun("{\"bar\":true}", "{\"foo\":{\"bar\":true}}", ".foo");
+
+    try testRun("123", "{\"a\":123}", ".[\"a\"]");
+    try testRun("null", "{\"a\":123}", ".[\"b\"]");
+    try testRun("\"hello\"", "{\"foo\":\"hello\"}", ".[\"foo\"]");
+
+    try testRun("42", "{\"foo bar\":42}", ".[\"foo bar\"]");
+    try testRun("\"value\"", "{\"key with spaces\":\"value\"}", ".[\"key with spaces\"]");
+
+    try testRun("\"world\"", "{\"key\":\"hello\",\"hello\":\"world\"}", ".[.key]");
+    try testRun("3", "[1,2,3,4,5]", ".[1 + 1]");
+    try testRun("5", "[1,2,3,4,5]", ".[2 * 2]");
 }
 
 test "arithmetic operations" {
