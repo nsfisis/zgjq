@@ -76,11 +76,31 @@ test "object key filter" {
     try testRun("{\"bar\":true}", "{\"foo\":{\"bar\":true}}", ".foo");
 }
 
-test "addition" {
+test "arithmetic operations" {
     try testRun("579", "null", "123 + 456");
     try testRun("35", "{\"a\":12,\"b\":23}", ".a + .b");
     try testRun("12", "[1,2,3]", ".[1] + 10");
     try testRun("6", "null", "1 + 2 + 3");
+
+    try testRun("333", "null", "456 - 123");
+    try testRun("-11", "{\"a\":12,\"b\":23}", ".a - .b");
+    try testRun("-8", "[1,2,3]", ".[1] - 10");
+    try testRun("-4", "null", "1 - 2 - 3");
+
+    try testRun("56088", "null", "123 * 456");
+    try testRun("276", "{\"a\":12,\"b\":23}", ".a * .b");
+    try testRun("20", "[1,2,3]", ".[1] * 10");
+    try testRun("6", "null", "1 * 2 * 3");
+
+    try testRun("3", "null", "456 / 123");
+    try testRun("0", "{\"a\":12,\"b\":23}", ".a / .b");
+    try testRun("5", "[10,20,30]", ".[1] / 4");
+    try testRun("2", "null", "12 / 2 / 3");
+
+    try testRun("87", "null", "456 % 123");
+    try testRun("12", "{\"a\":12,\"b\":23}", ".a % .b");
+    try testRun("0", "[1,2,3]", ".[1] % 2");
+    try testRun("0", "null", "12 % 2 % 3");
 }
 
 test "pipe operator" {

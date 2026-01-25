@@ -198,6 +198,42 @@ pub const Runtime = struct {
                     const result = lhs + rhs;
                     try self.values.push(.{ .integer = result });
                 },
+                .sub => {
+                    std.debug.assert(self.values.ensureSize(3));
+
+                    _ = self.values.pop();
+                    const lhs = try self.values.popInteger();
+                    const rhs = try self.values.popInteger();
+                    const result = lhs - rhs;
+                    try self.values.push(.{ .integer = result });
+                },
+                .mul => {
+                    std.debug.assert(self.values.ensureSize(3));
+
+                    _ = self.values.pop();
+                    const lhs = try self.values.popInteger();
+                    const rhs = try self.values.popInteger();
+                    const result = lhs * rhs;
+                    try self.values.push(.{ .integer = result });
+                },
+                .div => {
+                    std.debug.assert(self.values.ensureSize(3));
+
+                    _ = self.values.pop();
+                    const lhs = try self.values.popInteger();
+                    const rhs = try self.values.popInteger();
+                    const result = @divTrunc(lhs, rhs);
+                    try self.values.push(.{ .integer = result });
+                },
+                .mod => {
+                    std.debug.assert(self.values.ensureSize(3));
+
+                    _ = self.values.pop();
+                    const lhs = try self.values.popInteger();
+                    const rhs = try self.values.popInteger();
+                    const result = @mod(lhs, rhs);
+                    try self.values.push(.{ .integer = result });
+                },
                 .object_key => |key| {
                     std.debug.assert(self.values.ensureSize(1));
 

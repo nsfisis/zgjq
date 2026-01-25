@@ -1,6 +1,7 @@
 const std = @import("std");
 const jv = @import("../jv.zig");
 const Ast = @import("./parse.zig").Ast;
+const BinaryOp = @import("./parse.zig").BinaryOp;
 
 pub const Opcode = enum {
     nop,
@@ -11,6 +12,10 @@ pub const Opcode = enum {
     subexp_end,
     array_index,
     add,
+    sub,
+    mul,
+    div,
+    mod,
     object_key,
     literal,
 };
@@ -26,6 +31,10 @@ pub const Instr = union(Opcode) {
     subexp_end,
     array_index,
     add,
+    sub,
+    mul,
+    div,
+    mod,
     object_key: []const u8,
     literal: *jv.Value,
 
@@ -68,7 +77,15 @@ fn compileExpr(allocator: std.mem.Allocator, compile_allocator: std.mem.Allocato
             try instrs.append(allocator, .subexp_begin);
             try instrs.appendSlice(allocator, lhs_instrs);
             try instrs.append(allocator, .subexp_end);
-            try instrs.append(allocator, .add);
+            const op_instr: Instr = switch (binary_expr.op) {
+                .add => .add,
+                .sub => .sub,
+                .mul => .mul,
+                .div => .div,
+                .mod => .mod,
+                else => return error.Unimplemented,
+            };
+            try instrs.append(allocator, op_instr);
         },
         .pipe => |pipe_expr| {
             const lhs_instrs = try compileExpr(allocator, compile_allocator, pipe_expr.lhs);

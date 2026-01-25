@@ -117,25 +117,14 @@ term:
     '.'
     '..'
     'break' BINDING
-    term FIELD '?'
-    FIELD '?'
-    term '.' STRING '?'
-    '.' STRING '?'
     term FIELD
     FIELD
     term '.' STRING
     '.' STRING
-    term '[' query ']' '?'
     term '[' query ']'
-    term '.' '[' query ']' '?'
     term '.' '[' query ']'
-    term '[' ']' '?'
     term '[' ']'
-    term '.' '[' ']' '?'
     term '.' '[' ']'
-    term '[' query ':' query ']' '?'
-    term '[' query ':' ']' '?'
-    term '[' ':' query ']' '?'
     term '[' query ':' query ']'
     term '[' query ':' ']'
     term '[' ':' query ']'
@@ -154,7 +143,6 @@ term:
     'if' query 'then' query else-body
     'try' expr 'catch' expr
     'try' expr
-    '$' '$' '$' BINDING
     BINDING
     '$__loc__'
     IDENT
