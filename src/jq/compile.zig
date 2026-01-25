@@ -16,6 +16,12 @@ pub const Opcode = enum {
     mul,
     div,
     mod,
+    eq,
+    ne,
+    lt,
+    gt,
+    le,
+    ge,
     object_key,
     literal,
 };
@@ -35,6 +41,12 @@ pub const Instr = union(Opcode) {
     mul,
     div,
     mod,
+    eq,
+    ne,
+    lt,
+    gt,
+    le,
+    ge,
     object_key: []const u8,
     literal: *jv.Value,
 
@@ -83,6 +95,12 @@ fn compileExpr(allocator: std.mem.Allocator, compile_allocator: std.mem.Allocato
                 .mul => .mul,
                 .div => .div,
                 .mod => .mod,
+                .eq => .eq,
+                .ne => .ne,
+                .lt => .lt,
+                .gt => .gt,
+                .le => .le,
+                .ge => .ge,
                 else => return error.Unimplemented,
             };
             try instrs.append(allocator, op_instr);

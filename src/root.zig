@@ -112,3 +112,55 @@ test "pipe operator" {
 test "comma operator" {
     try testRunMultiple(&.{ "12", "34", "56" }, "{\"a\":12,\"b\":34,\"c\":56}", ".a,.b,.c");
 }
+
+test "comparison operators" {
+    try testRun("true", "null", "1 == 1");
+    try testRun("false", "null", "1 == 2");
+    try testRun("false", "null", "1 != 1");
+    try testRun("true", "null", "1 != 2");
+
+    try testRun("true", "null", "1.5 == 1.5");
+    try testRun("false", "null", "1.5 == 2.5");
+
+    try testRun("true", "null", "1 == 1.0");
+    try testRun("false", "null", "1 == 1.5");
+
+    try testRun("true", "{\"a\":\"foo\",\"b\":\"foo\"}", ".a == .b");
+    try testRun("false", "{\"a\":\"foo\",\"b\":\"bar\"}", ".a == .b");
+    try testRun("true", "{\"a\":\"foo\",\"b\":\"bar\"}", ".a != .b");
+
+    try testRun("true", "null", ". == null");
+    try testRun("false", "null", ". != null");
+
+    try testRun("true", "true", ". == true");
+    try testRun("false", "true", ". == false");
+    try testRun("true", "false", ". != true");
+
+    try testRun("true", "null", "1 < 2");
+    try testRun("false", "null", "2 < 1");
+    try testRun("false", "null", "1 < 1");
+
+    try testRun("true", "null", "2 > 1");
+    try testRun("false", "null", "1 > 2");
+    try testRun("false", "null", "1 > 1");
+
+    try testRun("true", "null", "1 <= 2");
+    try testRun("true", "null", "1 <= 1");
+    try testRun("false", "null", "2 <= 1");
+
+    try testRun("true", "null", "2 >= 1");
+    try testRun("true", "null", "1 >= 1");
+    try testRun("false", "null", "1 >= 2");
+
+    try testRun("true", "null", "1.5 < 2.5");
+    try testRun("false", "null", "2.5 < 1.5");
+
+    try testRun("true", "null", "1 < 1.5");
+    try testRun("false", "null", "2 < 1.5");
+
+    try testRun("true", "{\"a\":\"abc\",\"b\":\"abd\"}", ".a < .b");
+    try testRun("false", "{\"a\":\"abd\",\"b\":\"abc\"}", ".a < .b");
+    try testRun("true", "{\"a\":\"abc\",\"b\":\"abc\"}", ".a <= .b");
+    try testRun("true", "{\"a\":\"abd\",\"b\":\"abc\"}", ".a > .b");
+    try testRun("true", "{\"a\":\"abc\",\"b\":\"abc\"}", ".a >= .b");
+}

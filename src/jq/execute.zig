@@ -234,6 +234,60 @@ pub const Runtime = struct {
                     const result = @mod(lhs, rhs);
                     try self.values.push(.{ .integer = result });
                 },
+                .eq => {
+                    std.debug.assert(self.values.ensureSize(3));
+
+                    _ = self.values.pop();
+                    const lhs = self.values.pop();
+                    const rhs = self.values.pop();
+                    const result = try compareValues(lhs, rhs, .eq);
+                    try self.values.push(.{ .bool = result });
+                },
+                .ne => {
+                    std.debug.assert(self.values.ensureSize(3));
+
+                    _ = self.values.pop();
+                    const lhs = self.values.pop();
+                    const rhs = self.values.pop();
+                    const result = try compareValues(lhs, rhs, .ne);
+                    try self.values.push(.{ .bool = result });
+                },
+                .lt => {
+                    std.debug.assert(self.values.ensureSize(3));
+
+                    _ = self.values.pop();
+                    const lhs = self.values.pop();
+                    const rhs = self.values.pop();
+                    const result = try compareValues(lhs, rhs, .lt);
+                    try self.values.push(.{ .bool = result });
+                },
+                .gt => {
+                    std.debug.assert(self.values.ensureSize(3));
+
+                    _ = self.values.pop();
+                    const lhs = self.values.pop();
+                    const rhs = self.values.pop();
+                    const result = try compareValues(lhs, rhs, .gt);
+                    try self.values.push(.{ .bool = result });
+                },
+                .le => {
+                    std.debug.assert(self.values.ensureSize(3));
+
+                    _ = self.values.pop();
+                    const lhs = self.values.pop();
+                    const rhs = self.values.pop();
+                    const result = try compareValues(lhs, rhs, .le);
+                    try self.values.push(.{ .bool = result });
+                },
+                .ge => {
+                    std.debug.assert(self.values.ensureSize(3));
+
+                    _ = self.values.pop();
+                    const lhs = self.values.pop();
+                    const rhs = self.values.pop();
+                    const result = try compareValues(lhs, rhs, .ge);
+                    try self.values.push(.{ .bool = result });
+                },
                 .object_key => |key| {
                     std.debug.assert(self.values.ensureSize(1));
 
@@ -265,3 +319,78 @@ pub const Runtime = struct {
         }
     }
 };
+
+const CompareOp = enum { eq, ne, lt, gt, le, ge };
+
+fn compareValues(lhs: jv.Value, rhs: jv.Value, op: CompareOp) ExecuteError!bool {
+    const lhs_tag = std.meta.activeTag(lhs);
+    const rhs_tag = std.meta.activeTag(rhs);
+
+    if (lhs_tag != rhs_tag) {
+        const lhs_is_number = lhs_tag == .integer or lhs_tag == .float;
+        const rhs_is_number = rhs_tag == .integer or rhs_tag == .float;
+        if (lhs_is_number and rhs_is_number) {
+            return compareNumbers(lhs, rhs, op);
+        }
+        return error.InvalidType;
+    }
+
+    return switch (lhs) {
+        .null => switch (op) {
+            .eq => true,
+            .ne => false,
+            .lt, .gt, .le, .ge => error.Unimplemented,
+        },
+        .bool => |lhs_bool| {
+            const rhs_bool = rhs.bool;
+            return switch (op) {
+                .eq => lhs_bool == rhs_bool,
+                .ne => lhs_bool != rhs_bool,
+                .lt, .gt, .le, .ge => error.Unimplemented,
+            };
+        },
+        .integer, .float => compareNumbers(lhs, rhs, op),
+        .string => |lhs_str| {
+            const rhs_str = rhs.string;
+            const order = std.mem.order(u8, lhs_str, rhs_str);
+            return switch (op) {
+                .eq => order == .eq,
+                .ne => order != .eq,
+                .lt => order == .lt,
+                .gt => order == .gt,
+                .le => order == .lt or order == .eq,
+                .ge => order == .gt or order == .eq,
+            };
+        },
+        .array => switch (op) {
+            .eq, .ne => error.Unimplemented,
+            .lt, .gt, .le, .ge => error.Unimplemented,
+        },
+        .object => switch (op) {
+            .eq, .ne => error.Unimplemented,
+            .lt, .gt, .le, .ge => error.Unimplemented,
+        },
+        .number_string => error.Unimplemented,
+    };
+}
+
+fn compareNumbers(lhs: jv.Value, rhs: jv.Value, op: CompareOp) bool {
+    const lhs_f: f64 = switch (lhs) {
+        .integer => |i| @floatFromInt(i),
+        .float => |f| f,
+        else => unreachable,
+    };
+    const rhs_f: f64 = switch (rhs) {
+        .integer => |i| @floatFromInt(i),
+        .float => |f| f,
+        else => unreachable,
+    };
+    return switch (op) {
+        .eq => lhs_f == rhs_f,
+        .ne => lhs_f != rhs_f,
+        .lt => lhs_f < rhs_f,
+        .gt => lhs_f > rhs_f,
+        .le => lhs_f <= rhs_f,
+        .ge => lhs_f >= rhs_f,
+    };
+}
