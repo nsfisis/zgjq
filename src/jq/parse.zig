@@ -316,6 +316,33 @@ fn parseTerm(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, t
         return number_node;
     }
 
+    if (first_token.kind() == .keyword_null) {
+        _ = try tokens.next();
+        const null_value = try allocator.create(jv.Value);
+        null_value.* = .null;
+        const null_node = try parse_allocator.create(Ast);
+        null_node.* = .{ .literal = null_value };
+        return null_node;
+    }
+
+    if (first_token.kind() == .keyword_true) {
+        _ = try tokens.next();
+        const true_value = try allocator.create(jv.Value);
+        true_value.* = .{ .bool = true };
+        const true_node = try parse_allocator.create(Ast);
+        true_node.* = .{ .literal = true_value };
+        return true_node;
+    }
+
+    if (first_token.kind() == .keyword_false) {
+        _ = try tokens.next();
+        const false_value = try allocator.create(jv.Value);
+        false_value.* = .{ .bool = false };
+        const false_node = try parse_allocator.create(Ast);
+        false_node.* = .{ .literal = false_value };
+        return false_node;
+    }
+
     _ = try tokens.expect(.dot);
 
     const next_token = try tokens.peek();
