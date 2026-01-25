@@ -216,3 +216,41 @@ test "comparison operators" {
     try testRun("true", "{\"a\":\"abd\",\"b\":\"abc\"}", ".a > .b");
     try testRun("true", "{\"a\":\"abc\",\"b\":\"abc\"}", ".a >= .b");
 }
+
+test "and operator" {
+    try testRun("true", "null", "true and true");
+    try testRun("false", "null", "true and false");
+    try testRun("false", "null", "false and true");
+    try testRun("false", "null", "false and false");
+
+    try testRun("false", "null", "null and true");
+    try testRun("false", "null", "true and null");
+
+    try testRun("true", "null", "1 and 1");
+    try testRun("false", "null", "1 and false");
+    try testRun("true", "null", "\"hello\" and true");
+
+    try testRun("true", "{\"a\":true,\"b\":true}", ".a and .b");
+    try testRun("false", "{\"a\":true,\"b\":false}", ".a and .b");
+    try testRun("false", "{\"a\":false,\"b\":true}", ".a and .b");
+}
+
+test "or operator" {
+    try testRun("true", "null", "true or true");
+    try testRun("true", "null", "true or false");
+    try testRun("true", "null", "false or true");
+    try testRun("false", "null", "false or false");
+
+    try testRun("true", "null", "null or true");
+    try testRun("true", "null", "true or null");
+    try testRun("false", "null", "null or false");
+    try testRun("false", "null", "false or null");
+
+    try testRun("true", "null", "1 or false");
+    try testRun("true", "null", "false or 1");
+    try testRun("false", "null", "false or false");
+
+    try testRun("true", "{\"a\":true,\"b\":false}", ".a or .b");
+    try testRun("true", "{\"a\":false,\"b\":true}", ".a or .b");
+    try testRun("false", "{\"a\":false,\"b\":false}", ".a or .b");
+}

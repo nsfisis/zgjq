@@ -9,7 +9,10 @@ pub const Opcode = enum {
     nop,
     ret,
     jump,
+    jump_unless,
     fork,
+    dup,
+    pop,
     subexp_begin,
     subexp_end,
     index,
@@ -26,6 +29,8 @@ pub const Opcode = enum {
     le,
     ge,
     @"const",
+    const_true,
+    const_false,
 };
 
 pub const Instr = union(Opcode) {
@@ -34,7 +39,10 @@ pub const Instr = union(Opcode) {
     nop,
     ret,
     jump: usize,
+    jump_unless: usize,
     fork: usize,
+    dup,
+    pop,
     subexp_begin,
     subexp_end,
     index,
@@ -51,6 +59,8 @@ pub const Instr = union(Opcode) {
     le,
     ge,
     @"const": ConstIndex,
+    const_true,
+    const_false,
 
     pub fn op(self: Self) Opcode {
         return self;
@@ -100,6 +110,95 @@ fn compileExpr(allocator: std.mem.Allocator, compile_allocator: std.mem.Allocato
                 else => return error.Unimplemented,
             };
             try instrs.append(allocator, op_instr);
+        },
+        .and_expr => |and_expr| {
+            //     DUP
+            //     <lhs>
+            //     JUMP_UNLESS l3
+            //     POP
+            //     <rhs>
+            //     JUMP_UNLESS l1
+            //     CONST_TRUE
+            //     JUMP l2
+            // l1: CONST_FALSE
+            // l2: JUMP l4
+            // l3: POP
+            //     CONST_FALSE
+            // l4:
+            const lhs_instrs = try compileExpr(allocator, compile_allocator, and_expr.lhs);
+            defer allocator.free(lhs_instrs);
+            const rhs_instrs = try compileExpr(allocator, compile_allocator, and_expr.rhs);
+            defer allocator.free(rhs_instrs);
+
+            try instrs.append(allocator, .dup);
+            try instrs.appendSlice(allocator, lhs_instrs);
+            const jump1_idx = instrs.items.len;
+            try instrs.append(allocator, .{ .jump_unless = 0 });
+            try instrs.append(allocator, .pop);
+            try instrs.appendSlice(allocator, rhs_instrs);
+            const jump2_idx = instrs.items.len;
+            try instrs.append(allocator, .{ .jump_unless = 0 });
+            try instrs.append(allocator, .const_true);
+            const jump3_idx = instrs.items.len;
+            try instrs.append(allocator, .{ .jump = 0 });
+            const l1 = instrs.items.len;
+            try instrs.append(allocator, .const_false);
+            const jump4_idx = instrs.items.len;
+            const l2 = instrs.items.len;
+            try instrs.append(allocator, .{ .jump = 0 });
+            const l3 = instrs.items.len;
+            try instrs.append(allocator, .pop);
+            try instrs.append(allocator, .const_false);
+            const l4 = instrs.items.len;
+
+            instrs.items[jump1_idx] = .{ .jump_unless = l3 - jump1_idx };
+            instrs.items[jump2_idx] = .{ .jump_unless = l1 - jump2_idx };
+            instrs.items[jump3_idx] = .{ .jump = l2 - jump3_idx };
+            instrs.items[jump4_idx] = .{ .jump = l4 - jump4_idx };
+        },
+        .or_expr => |or_expr| {
+            //     DUP
+            //     <lhs>
+            //     JUMP_UNLESS l1
+            //     POP
+            //     CONST_TRUE
+            //     JUMP l3
+            // l1: POP
+            //     <rhs>
+            //     JUMP_UNLESS l2
+            //     CONST_TRUE
+            //     JUMP l3
+            // l2: CONST_FALSE
+            // l3:
+            const lhs_instrs = try compileExpr(allocator, compile_allocator, or_expr.lhs);
+            defer allocator.free(lhs_instrs);
+            const rhs_instrs = try compileExpr(allocator, compile_allocator, or_expr.rhs);
+            defer allocator.free(rhs_instrs);
+
+            try instrs.append(allocator, .dup);
+            try instrs.appendSlice(allocator, lhs_instrs);
+            const jump1_idx = instrs.items.len;
+            try instrs.append(allocator, .{ .jump_unless = 0 });
+            try instrs.append(allocator, .pop);
+            try instrs.append(allocator, .const_true);
+            const jump2_idx = instrs.items.len;
+            try instrs.append(allocator, .{ .jump = 0 });
+            const l1 = instrs.items.len;
+            try instrs.append(allocator, .pop);
+            try instrs.appendSlice(allocator, rhs_instrs);
+            const jump3_idx = instrs.items.len;
+            try instrs.append(allocator, .{ .jump_unless = 0 });
+            try instrs.append(allocator, .const_true);
+            const jump4_idx = instrs.items.len;
+            try instrs.append(allocator, .{ .jump = 0 });
+            const l2 = instrs.items.len;
+            try instrs.append(allocator, .const_false);
+            const l3 = instrs.items.len;
+
+            instrs.items[jump1_idx] = .{ .jump_unless = l1 - jump1_idx };
+            instrs.items[jump2_idx] = .{ .jump = l3 - jump2_idx };
+            instrs.items[jump3_idx] = .{ .jump_unless = l2 - jump3_idx };
+            instrs.items[jump4_idx] = .{ .jump = l3 - jump4_idx };
         },
         .pipe => |pipe_expr| {
             const lhs_instrs = try compileExpr(allocator, compile_allocator, pipe_expr.lhs);

@@ -14,6 +14,8 @@ pub const AstKind = enum {
     index,
     literal,
     binary_expr,
+    or_expr,
+    and_expr,
     pipe,
     comma,
 };
@@ -28,8 +30,6 @@ pub const BinaryOp = enum {
     mul_assign,
     div_assign,
     mod_assign,
-    @"or",
-    @"and",
     eq,
     ne,
     lt,
@@ -48,6 +48,8 @@ pub const Ast = union(AstKind) {
     index: struct { base: *Ast, index: *Ast, is_optional: bool },
     literal: ConstIndex,
     binary_expr: struct { op: BinaryOp, lhs: *Ast, rhs: *Ast },
+    or_expr: struct { lhs: *Ast, rhs: *Ast },
+    and_expr: struct { lhs: *Ast, rhs: *Ast },
     pipe: struct { lhs: *Ast, rhs: *Ast },
     comma: struct { lhs: *Ast, rhs: *Ast },
 
@@ -202,8 +204,7 @@ const Parser = struct {
         }
         const rhs = try self.parseExpr4();
         const ast = try self.parse_allocator.create(Ast);
-        ast.* = .{ .binary_expr = .{
-            .op = .@"or",
+        ast.* = .{ .or_expr = .{
             .lhs = lhs,
             .rhs = rhs,
         } };
@@ -217,8 +218,7 @@ const Parser = struct {
         }
         const rhs = try self.parseExpr5();
         const ast = try self.parse_allocator.create(Ast);
-        ast.* = .{ .binary_expr = .{
-            .op = .@"and",
+        ast.* = .{ .and_expr = .{
             .lhs = lhs,
             .rhs = rhs,
         } };

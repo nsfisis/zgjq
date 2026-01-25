@@ -183,8 +183,33 @@ pub const Runtime = struct {
                 .jump => |offset| {
                     self.pc += offset - 1;
                 },
+                .jump_unless => |offset| {
+                    std.debug.assert(self.values.ensureSize(1));
+
+                    const value = self.values.pop();
+                    const is_falsy = switch (value) {
+                        .null => true,
+                        .bool => |b| !b,
+                        else => false,
+                    };
+                    if (is_falsy) {
+                        self.pc += offset - 1;
+                    }
+                    // FIXME: optimize pop and push
+                    try self.values.push(value);
+                },
                 .fork => |offset| {
                     try self.save_stack(self.pc + offset);
+                },
+                .dup => {
+                    std.debug.assert(self.values.ensureSize(1));
+
+                    try self.values.dup();
+                },
+                .pop => {
+                    std.debug.assert(self.values.ensureSize(1));
+
+                    _ = self.values.pop();
                 },
                 .subexp_begin => try self.values.dup(),
                 .subexp_end => try self.values.swap(),
@@ -308,6 +333,18 @@ pub const Runtime = struct {
 
                     _ = self.values.pop();
                     try self.values.push(self.constants.items[@intFromEnum(idx)]);
+                },
+                .const_true => {
+                    std.debug.assert(self.values.ensureSize(1));
+
+                    _ = self.values.pop();
+                    try self.values.push(.{ .bool = true });
+                },
+                .const_false => {
+                    std.debug.assert(self.values.ensureSize(1));
+
+                    _ = self.values.pop();
+                    try self.values.push(.{ .bool = false });
                 },
             }
         }
