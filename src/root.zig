@@ -61,8 +61,18 @@ test "identity filter" {
     try testRun("3.1415", "3.1415", ".");
     try testRun("[]", "[]", ".");
     try testRun("{}", "{}", ".");
-    try testRun("[1,2,3]", "[1,2,3]", ".");
-    try testRun("{\"a\":123}", "{\"a\":123}", ".");
+    try testRun(
+        \\[
+        \\  1,
+        \\  2,
+        \\  3
+        \\]
+    , "[1,2,3]", ".");
+    try testRun(
+        \\{
+        \\  "a": 123
+        \\}
+    , "{\"a\":123}", ".");
 }
 
 test "index access" {
@@ -81,8 +91,18 @@ test "index access" {
     try testRun("123", "{\"a\":123}", ".a");
     try testRun("null", "{\"a\":123}", ".b");
     try testRun("\"hello\"", "{\"foo\":\"hello\"}", ".foo");
-    try testRun("[1,2,3]", "{\"arr\":[1,2,3]}", ".arr");
-    try testRun("{\"bar\":true}", "{\"foo\":{\"bar\":true}}", ".foo");
+    try testRun(
+        \\[
+        \\  1,
+        \\  2,
+        \\  3
+        \\]
+    , "{\"arr\":[1,2,3]}", ".arr");
+    try testRun(
+        \\{
+        \\  "bar": true
+        \\}
+    , "{\"foo\":{\"bar\":true}}", ".foo");
 
     try testRun("123", "{\"a\":123}", ".[\"a\"]");
     try testRun("null", "{\"a\":123}", ".[\"b\"]");
