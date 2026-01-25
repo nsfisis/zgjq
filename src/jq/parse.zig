@@ -163,7 +163,13 @@ fn parseTerm(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator, t
     if (first_token.kind() == .number) {
         _ = try tokens.next();
         const number_value = try allocator.create(jv.Value);
-        number_value.* = .{ .integer = first_token.number };
+        const f = first_token.number;
+        const i: i64 = @intFromFloat(f);
+        if (@as(f64, @floatFromInt(i)) == f) {
+            number_value.* = .{ .integer = i };
+        } else {
+            number_value.* = .{ .float = f };
+        }
         const number_node = try parse_allocator.create(Ast);
         number_node.* = .{ .literal = number_value };
         return number_node;
@@ -205,7 +211,7 @@ fn parseIndexAccess(allocator: std.mem.Allocator, parse_allocator: std.mem.Alloc
     _ = try tokens.expect(.bracket_right);
 
     const index_value = try allocator.create(jv.Value);
-    index_value.* = .{ .integer = index_token.number };
+    index_value.* = .{ .integer = @intFromFloat(index_token.number) };
     const index_node = try parse_allocator.create(Ast);
     index_node.* = .{ .literal = index_value };
     const ast = try parse_allocator.create(Ast);

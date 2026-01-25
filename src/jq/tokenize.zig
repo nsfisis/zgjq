@@ -3,6 +3,7 @@ const std = @import("std");
 pub const TokenizeError = error{
     UnexpectedEnd,
     InvalidCharacter,
+    InvalidNumber,
 };
 
 pub const TokenKind = enum {
@@ -132,7 +133,7 @@ pub const Token = union(TokenKind) {
     keyword_try,
 
     identifier: []const u8,
-    number: i64,
+    number: f64,
 
     pub fn kind(self: @This()) TokenKind {
         return self;
@@ -234,19 +235,75 @@ fn tokenizeIdentifier(allocator: std.mem.Allocator, reader: *std.Io.Reader, firs
     return buffer.toOwnedSlice(allocator);
 }
 
-fn tokenizeNumber(reader: *std.Io.Reader, first: u8) error{ReadFailed}!i64 {
-    var value: i64 = first - '0';
+fn tokenizeNumber(allocator: std.mem.Allocator, reader: *std.Io.Reader, first: u8) !f64 {
+    var buffer = try std.ArrayList(u8).initCapacity(allocator, 16);
+    try buffer.append(allocator, first);
 
+    // Integer part
     while (try peekByte(reader)) |c| {
         if (std.ascii.isDigit(c)) {
-            value = value * 10 + (c - '0');
+            try buffer.append(allocator, c);
             reader.toss(1);
         } else {
             break;
         }
     }
 
-    return value;
+    // Fractional part
+    if (try peekByte(reader) == '.') {
+        const lookahead = reader.peek(2) catch |err| switch (err) {
+            error.EndOfStream => null,
+            error.ReadFailed => return error.ReadFailed,
+        };
+        if (lookahead) |bytes| {
+            if (std.ascii.isDigit(bytes[1])) {
+                try buffer.append(allocator, '.');
+                reader.toss(1);
+                while (try peekByte(reader)) |c| {
+                    if (std.ascii.isDigit(c)) {
+                        try buffer.append(allocator, c);
+                        reader.toss(1);
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // Exponent part
+    if (try peekByte(reader)) |c| {
+        if (c == 'e' or c == 'E') {
+            try buffer.append(allocator, c);
+            reader.toss(1);
+
+            // Sign
+            if (try peekByte(reader)) |sign| {
+                if (sign == '+' or sign == '-') {
+                    try buffer.append(allocator, sign);
+                    reader.toss(1);
+                }
+            }
+
+            // Exponent
+            var has_exp_digits = false;
+            while (try peekByte(reader)) |d| {
+                if (std.ascii.isDigit(d)) {
+                    try buffer.append(allocator, d);
+                    reader.toss(1);
+                    has_exp_digits = true;
+                } else {
+                    break;
+                }
+            }
+            if (!has_exp_digits) {
+                return error.InvalidNumber;
+            }
+        }
+    }
+
+    const slice = buffer.toOwnedSlice(allocator) catch return error.OutOfMemory;
+    return std.fmt.parseFloat(f64, slice) catch return error.InvalidNumber;
 }
 
 fn tryConvertToKeywordToken(identifier: []const u8) ?Token {
@@ -328,7 +385,7 @@ pub fn tokenize(allocator: std.mem.Allocator, reader: *std.Io.Reader) ![]Token {
             '}' => .brace_right,
             else => blk: {
                 if (std.ascii.isDigit(c)) {
-                    break :blk .{ .number = try tokenizeNumber(reader, c) };
+                    break :blk .{ .number = try tokenizeNumber(allocator, reader, c) };
                 } else if (isIdentifierStart(c)) {
                     const ident = try tokenizeIdentifier(allocator, reader, c);
                     break :blk tryConvertToKeywordToken(ident) orelse Token{ .identifier = ident };
@@ -692,4 +749,81 @@ test "tokenize comment with single CR does not end comment" {
     try std.testing.expectEqual(.pipe, tokens[2]);
     try std.testing.expectEqualStrings("baz", tokens[3].identifier);
     try std.testing.expectEqual(.end, tokens[4]);
+}
+
+test "tokenize floating point numbers" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed("3.14 1.5 0.5");
+    const tokens = try tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectEqual(4, tokens.len);
+    try std.testing.expectEqual(Token{ .number = 3.14 }, tokens[0]);
+    try std.testing.expectEqual(Token{ .number = 1.5 }, tokens[1]);
+    try std.testing.expectEqual(Token{ .number = 0.5 }, tokens[2]);
+    try std.testing.expectEqual(.end, tokens[3]);
+}
+
+test "tokenize exponent notation" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed("1e10 1E10 1e+10 1e-10");
+    const tokens = try tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectEqual(5, tokens.len);
+    try std.testing.expectEqual(Token{ .number = 1e10 }, tokens[0]);
+    try std.testing.expectEqual(Token{ .number = 1e10 }, tokens[1]);
+    try std.testing.expectEqual(Token{ .number = 1e10 }, tokens[2]);
+    try std.testing.expectEqual(Token{ .number = 1e-10 }, tokens[3]);
+    try std.testing.expectEqual(.end, tokens[4]);
+}
+
+test "tokenize float with exponent" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed("1.5e-3 2.5E+2");
+    const tokens = try tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectEqual(3, tokens.len);
+    try std.testing.expectEqual(Token{ .number = 1.5e-3 }, tokens[0]);
+    try std.testing.expectEqual(Token{ .number = 2.5e+2 }, tokens[1]);
+    try std.testing.expectEqual(.end, tokens[2]);
+}
+
+test "tokenize number followed by dot dot" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    // "1..2" should be parsed as 1, .., 2 not 1. .2
+    var reader = std.Io.Reader.fixed("1..2");
+    const tokens = try tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectEqual(4, tokens.len);
+    try std.testing.expectEqual(Token{ .number = 1 }, tokens[0]);
+    try std.testing.expectEqual(.dot_dot, tokens[1]);
+    try std.testing.expectEqual(Token{ .number = 2 }, tokens[2]);
+    try std.testing.expectEqual(.end, tokens[3]);
+}
+
+test "tokenize invalid exponent" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed("1e");
+    const result = tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectError(error.InvalidNumber, result);
+}
+
+test "tokenize invalid exponent with sign only" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed("1e+");
+    const result = tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectError(error.InvalidNumber, result);
 }
