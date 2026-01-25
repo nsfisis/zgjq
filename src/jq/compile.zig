@@ -57,7 +57,12 @@ pub const Instr = union(Opcode) {
     pub fn deinit(self: Self, allocator: std.mem.Allocator) void {
         switch (self) {
             .object_key => |key| allocator.free(key),
-            .literal => |value| allocator.destroy(value),
+            .literal => |value| {
+                if (value.* == .string) {
+                    allocator.free(value.string);
+                }
+                allocator.destroy(value);
+            },
             else => {},
         }
     }

@@ -352,6 +352,14 @@ fn parsePrimary(allocator: std.mem.Allocator, parse_allocator: std.mem.Allocator
             number_node.* = .{ .literal = number_value };
             return number_node;
         },
+        .string => |s| {
+            _ = try tokens.next();
+            const string_value = try allocator.create(jv.Value);
+            string_value.* = .{ .string = try allocator.dupe(u8, s) };
+            const string_node = try parse_allocator.create(Ast);
+            string_node.* = .{ .literal = string_value };
+            return string_node;
+        },
         .dot => {
             _ = try tokens.next();
             const ast = try parse_allocator.create(Ast);

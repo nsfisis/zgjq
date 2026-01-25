@@ -42,6 +42,13 @@ fn testRunMultiple(expected: []const []const u8, input: []const u8, query: []con
     try std.testing.expectEqual(null, try runtime.next());
 }
 
+test "literals" {
+    try testRun("\"hello\"", "null", "\"hello\"");
+    try testRun("\"\"", "null", "\"\"");
+    try testRun("\"hello\\nworld\"", "null", "\"hello\\nworld\"");
+    try testRun("\"hello\"", "{\"a\":1}", "\"hello\"");
+}
+
 test "identity filter" {
     try testRun("null", "null", ".");
     try testRun("false", "false", ".");

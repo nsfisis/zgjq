@@ -95,6 +95,7 @@ primary:
     'true'
     'false'
     NUMBER
+    STRING
     '.'
     FIELD
 ```
@@ -208,7 +209,10 @@ term:
     term '[' query ':' ']'
     term '[' ':' query ']'
     term '?'
-    LITERAL
+    'null'
+    'true'
+    'false'
+    NUMBER
     STRING
     FORMAT
     '-' term
