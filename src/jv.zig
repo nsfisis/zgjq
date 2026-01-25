@@ -4,3 +4,5 @@ pub const Object = @import("./jv/value.zig").Object;
 
 pub const parse = @import("./jv/parse.zig").parse;
 pub const stringify = @import("./jv/stringify.zig").stringify;
+
+pub const ops = @import("./jv/ops.zig");
