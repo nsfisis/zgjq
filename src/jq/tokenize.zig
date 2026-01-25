@@ -69,6 +69,7 @@ pub const TokenKind = enum {
 
     identifier,
     number,
+    format,
 };
 
 pub const Token = union(TokenKind) {
@@ -134,6 +135,7 @@ pub const Token = union(TokenKind) {
 
     identifier: []const u8,
     number: f64,
+    format: []const u8,
 
     pub fn kind(self: @This()) TokenKind {
         return self;
@@ -306,6 +308,29 @@ fn tokenizeNumber(allocator: std.mem.Allocator, reader: *std.Io.Reader, first: u
     return std.fmt.parseFloat(f64, slice) catch return error.InvalidNumber;
 }
 
+fn tokenizeFormat(allocator: std.mem.Allocator, reader: *std.Io.Reader) ![]const u8 {
+    // Check that there's an identifier start after '@'
+    const first = try peekByte(reader) orelse return error.InvalidCharacter;
+    if (!isIdentifierStart(first)) {
+        return error.InvalidCharacter;
+    }
+
+    var buffer = try std.ArrayList(u8).initCapacity(allocator, 16);
+    reader.toss(1);
+    try buffer.append(allocator, first);
+
+    while (try peekByte(reader)) |c| {
+        if (isIdentifierContinue(c)) {
+            try buffer.append(allocator, c);
+            reader.toss(1);
+        } else {
+            break;
+        }
+    }
+
+    return buffer.toOwnedSlice(allocator);
+}
+
 fn tryConvertToKeywordToken(identifier: []const u8) ?Token {
     const keywords = .{
         .{ "and", Token.keyword_and },
@@ -378,6 +403,7 @@ pub fn tokenize(allocator: std.mem.Allocator, reader: *std.Io.Reader) ![]Token {
                 if (try takeByteIf(reader, '/')) .question_slash_slash else return error.InvalidCharacter
             else
                 .question,
+            '@' => .{ .format = try tokenizeFormat(allocator, reader) },
             '[' => .bracket_left,
             ']' => .bracket_right,
             '{' => .brace_left,
@@ -826,4 +852,56 @@ test "tokenize invalid exponent with sign only" {
     const result = tokenize(allocator.allocator(), &reader);
 
     try std.testing.expectError(error.InvalidNumber, result);
+}
+
+test "tokenize format" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed("@base64 @uri @json");
+    const tokens = try tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectEqual(4, tokens.len);
+    try std.testing.expectEqualStrings("base64", tokens[0].format);
+    try std.testing.expectEqualStrings("uri", tokens[1].format);
+    try std.testing.expectEqualStrings("json", tokens[2].format);
+    try std.testing.expectEqual(.end, tokens[3]);
+}
+
+test "tokenize format with underscore" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed("@base64d @_foo");
+    const tokens = try tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectEqual(3, tokens.len);
+    try std.testing.expectEqualStrings("base64d", tokens[0].format);
+    try std.testing.expectEqualStrings("_foo", tokens[1].format);
+    try std.testing.expectEqual(.end, tokens[2]);
+}
+
+test "tokenize format in expression" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed(".foo | @base64");
+    const tokens = try tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectEqual(5, tokens.len);
+    try std.testing.expectEqual(.dot, tokens[0]);
+    try std.testing.expectEqualStrings("foo", tokens[1].identifier);
+    try std.testing.expectEqual(.pipe, tokens[2]);
+    try std.testing.expectEqualStrings("base64", tokens[3].format);
+    try std.testing.expectEqual(.end, tokens[4]);
+}
+
+test "tokenize format invalid" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed("@123");
+    const result = tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectError(error.InvalidCharacter, result);
 }
