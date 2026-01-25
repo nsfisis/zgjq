@@ -11,8 +11,7 @@ pub const ParseError = error{
 
 pub const AstKind = enum {
     identity,
-    array_index,
-    object_key,
+    index,
     literal,
     binary_expr,
     pipe,
@@ -46,8 +45,7 @@ pub const BinaryOp = enum {
 
 pub const Ast = union(AstKind) {
     identity,
-    array_index: struct { base: *Ast, index: *Ast },
-    object_key: []const u8,
+    index: struct { base: *Ast, index: *Ast },
     literal: ConstIndex,
     binary_expr: struct { op: BinaryOp, lhs: *Ast, rhs: *Ast },
     pipe: struct { lhs: *Ast, rhs: *Ast },
@@ -390,8 +388,14 @@ const Parser = struct {
             },
             .field => |name| {
                 _ = try self.tokens.next();
+                const base_ast = try self.parse_allocator.create(Ast);
+                base_ast.* = .identity;
+                try self.constants.append(self.allocator, .{ .string = try self.allocator.dupe(u8, name) });
+                const idx: ConstIndex = @enumFromInt(self.constants.items.len - 1);
+                const key_ast = try self.parse_allocator.create(Ast);
+                key_ast.* = .{ .literal = idx };
                 const ast = try self.parse_allocator.create(Ast);
-                ast.* = .{ .object_key = try self.allocator.dupe(u8, name) };
+                ast.* = .{ .index = .{ .base = base_ast, .index = key_ast } };
                 return ast;
             },
             else => return error.InvalidQuery,
@@ -409,7 +413,7 @@ const Parser = struct {
         index_node.* = .{ .literal = idx };
 
         const ast = try self.parse_allocator.create(Ast);
-        ast.* = .{ .array_index = .{ .base = base, .index = index_node } };
+        ast.* = .{ .index = .{ .base = base, .index = index_node } };
         return ast;
     }
 };

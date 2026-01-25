@@ -136,12 +136,7 @@ pub const Runtime = struct {
             }
         }
         self.constants.deinit(self.allocator);
-
-        for (self.instrs) |instr| {
-            instr.deinit(self.allocator);
-        }
         self.allocator.free(self.instrs);
-
         self.values.deinit();
         self.forks.deinit(self.allocator);
     }
@@ -193,12 +188,30 @@ pub const Runtime = struct {
                 },
                 .subexp_begin => try self.values.dup(),
                 .subexp_end => try self.values.swap(),
-                .array_index => {
+                .index => {
                     std.debug.assert(self.values.ensureSize(2));
 
-                    const array = try self.values.popArray();
-                    const index: usize = @intCast(try self.values.popInteger());
-                    const result = if (index < array.items.len) array.items[index] else .null;
+                    const base = self.values.pop();
+                    const key = self.values.pop();
+
+                    const result = switch (base) {
+                        .array => |arr| blk: {
+                            const idx: usize = @intCast(switch (key) {
+                                .integer => |i| i,
+                                else => return error.InvalidType,
+                            });
+                            break :blk if (idx < arr.items.len) arr.items[idx] else .null;
+                        },
+                        .object => |obj| blk: {
+                            const k = switch (key) {
+                                .string => |s| s,
+                                else => return error.InvalidType,
+                            };
+                            break :blk obj.get(k) orelse .null;
+                        },
+                        .null => .null,
+                        else => return error.InvalidType,
+                    };
                     try self.values.push(result);
                 },
                 .add => {
@@ -299,13 +312,6 @@ pub const Runtime = struct {
                     const rhs = self.values.pop();
                     const result = try compareValues(lhs, rhs, .ge);
                     try self.values.push(.{ .bool = result });
-                },
-                .object_key => |key| {
-                    std.debug.assert(self.values.ensureSize(1));
-
-                    const obj = try self.values.popObject();
-                    const result = obj.get(key) orelse .null;
-                    try self.values.push(result);
                 },
                 .@"const" => |idx| {
                     std.debug.assert(self.values.ensureSize(1));

@@ -12,7 +12,7 @@ pub const Opcode = enum {
     fork,
     subexp_begin,
     subexp_end,
-    array_index,
+    index,
     add,
     sub,
     mul,
@@ -24,7 +24,6 @@ pub const Opcode = enum {
     gt,
     le,
     ge,
-    object_key,
     @"const",
 };
 
@@ -37,7 +36,7 @@ pub const Instr = union(Opcode) {
     fork: usize,
     subexp_begin,
     subexp_end,
-    array_index,
+    index,
     add,
     sub,
     mul,
@@ -49,18 +48,10 @@ pub const Instr = union(Opcode) {
     gt,
     le,
     ge,
-    object_key: []const u8,
     @"const": ConstIndex,
 
     pub fn op(self: Self) Opcode {
         return self;
-    }
-
-    pub fn deinit(self: Self, allocator: std.mem.Allocator) void {
-        switch (self) {
-            .object_key => |key| allocator.free(key),
-            else => {},
-        }
     }
 };
 
@@ -69,18 +60,17 @@ fn compileExpr(allocator: std.mem.Allocator, compile_allocator: std.mem.Allocato
 
     switch (ast.*) {
         .identity => try instrs.append(allocator, .nop),
-        .array_index => |arr_idx| {
-            const base_instrs = try compileExpr(allocator, compile_allocator, arr_idx.base);
+        .index => |index| {
+            const base_instrs = try compileExpr(allocator, compile_allocator, index.base);
             defer allocator.free(base_instrs);
-            const index_instrs = try compileExpr(allocator, compile_allocator, arr_idx.index);
+            const index_instrs = try compileExpr(allocator, compile_allocator, index.index);
             defer allocator.free(index_instrs);
             try instrs.appendSlice(allocator, base_instrs);
             try instrs.append(allocator, .subexp_begin);
             try instrs.appendSlice(allocator, index_instrs);
             try instrs.append(allocator, .subexp_end);
-            try instrs.append(allocator, .array_index);
+            try instrs.append(allocator, .index);
         },
-        .object_key => |key| try instrs.append(allocator, .{ .object_key = key }),
         .literal => |idx| try instrs.append(allocator, .{ .@"const" = idx }),
         .binary_expr => |binary_expr| {
             const rhs_instrs = try compileExpr(allocator, compile_allocator, binary_expr.rhs);
