@@ -92,6 +92,17 @@ const TokenStream = struct {
         }
         return token;
     }
+
+    fn consumeIf(self: *Self, expected: TokenKind) bool {
+        if (self.current_position >= self.tokens.len) {
+            return false;
+        }
+        if (self.tokens[self.current_position].kind() == expected) {
+            self.current_position += 1;
+            return true;
+        }
+        return false;
+    }
 };
 
 const Parser = struct {
@@ -116,20 +127,14 @@ const Parser = struct {
 
     fn parseQuery2(self: *Self) !*Ast {
         var lhs = try self.parseQuery3();
-        while (true) {
-            const token = self.tokens.peek() catch break;
-            if (token.kind() == .pipe) {
-                _ = try self.tokens.next();
-                const rhs = try self.parseQuery3();
-                const ast = try self.parse_allocator.create(Ast);
-                ast.* = .{ .pipe = .{
-                    .lhs = lhs,
-                    .rhs = rhs,
-                } };
-                lhs = ast;
-            } else {
-                break;
-            }
+        while (self.tokens.consumeIf(.pipe)) {
+            const rhs = try self.parseQuery3();
+            const ast = try self.parse_allocator.create(Ast);
+            ast.* = .{ .pipe = .{
+                .lhs = lhs,
+                .rhs = rhs,
+            } };
+            lhs = ast;
         }
         _ = try self.tokens.expect(.end);
         return lhs;
@@ -137,41 +142,29 @@ const Parser = struct {
 
     fn parseQuery3(self: *Self) !*Ast {
         var lhs = try self.parseExpr();
-        while (true) {
-            const token = self.tokens.peek() catch return lhs;
-            if (token.kind() == .comma) {
-                _ = try self.tokens.next();
-                const rhs = try self.parseExpr();
-                const ast = try self.parse_allocator.create(Ast);
-                ast.* = .{ .comma = .{
-                    .lhs = lhs,
-                    .rhs = rhs,
-                } };
-                lhs = ast;
-            } else {
-                break;
-            }
+        while (self.tokens.consumeIf(.comma)) {
+            const rhs = try self.parseExpr();
+            const ast = try self.parse_allocator.create(Ast);
+            ast.* = .{ .comma = .{
+                .lhs = lhs,
+                .rhs = rhs,
+            } };
+            lhs = ast;
         }
         return lhs;
     }
 
     fn parseExpr(self: *Self) !*Ast {
         var lhs = try self.parseExpr2();
-        while (true) {
-            const token = try self.tokens.peek();
-            if (token.kind() == .slash_slash) {
-                _ = try self.tokens.next();
-                const rhs = try self.parseExpr2();
-                const ast = try self.parse_allocator.create(Ast);
-                ast.* = .{ .binary_expr = .{
-                    .op = .alt,
-                    .lhs = lhs,
-                    .rhs = rhs,
-                } };
-                lhs = ast;
-            } else {
-                break;
-            }
+        while (self.tokens.consumeIf(.slash_slash)) {
+            const rhs = try self.parseExpr2();
+            const ast = try self.parse_allocator.create(Ast);
+            ast.* = .{ .binary_expr = .{
+                .op = .alt,
+                .lhs = lhs,
+                .rhs = rhs,
+            } };
+            lhs = ast;
         }
         return lhs;
     }
@@ -203,11 +196,9 @@ const Parser = struct {
 
     fn parseExpr3(self: *Self) !*Ast {
         const lhs = try self.parseExpr4();
-        const token = self.tokens.peek() catch return lhs;
-        if (token.kind() != .keyword_or) {
+        if (!self.tokens.consumeIf(.keyword_or)) {
             return lhs;
         }
-        _ = try self.tokens.next();
         const rhs = try self.parseExpr4();
         const ast = try self.parse_allocator.create(Ast);
         ast.* = .{ .binary_expr = .{
@@ -220,11 +211,9 @@ const Parser = struct {
 
     fn parseExpr4(self: *Self) !*Ast {
         const lhs = try self.parseExpr5();
-        const token = self.tokens.peek() catch return lhs;
-        if (token.kind() != .keyword_and) {
+        if (!self.tokens.consumeIf(.keyword_and)) {
             return lhs;
         }
-        _ = try self.tokens.next();
         const rhs = try self.parseExpr5();
         const ast = try self.parse_allocator.create(Ast);
         ast.* = .{ .binary_expr = .{
@@ -388,14 +377,7 @@ const Parser = struct {
             },
             .field => |name| {
                 _ = try self.tokens.next();
-                const is_optional = blk: {
-                    const token = self.tokens.peek() catch break :blk false;
-                    if (token.kind() == .question) {
-                        _ = try self.tokens.next();
-                        break :blk true;
-                    }
-                    break :blk false;
-                };
+                const is_optional = self.tokens.consumeIf(.question);
                 const base_ast = try self.parse_allocator.create(Ast);
                 base_ast.* = .identity;
                 try self.constants.append(self.allocator, .{ .string = try self.allocator.dupe(u8, name) });
@@ -415,14 +397,7 @@ const Parser = struct {
         const index_token = try self.tokens.expect(.number);
         _ = try self.tokens.expect(.bracket_right);
 
-        const is_optional = blk: {
-            const token = self.tokens.peek() catch break :blk false;
-            if (token.kind() == .question) {
-                _ = try self.tokens.next();
-                break :blk true;
-            }
-            break :blk false;
-        };
+        const is_optional = self.tokens.consumeIf(.question);
 
         try self.constants.append(self.allocator, .{ .integer = @intFromFloat(index_token.number) });
         const idx: ConstIndex = @enumFromInt(self.constants.items.len - 1);
