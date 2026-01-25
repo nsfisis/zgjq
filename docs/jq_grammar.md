@@ -88,7 +88,7 @@ term:
     primary { suffix }*
 
 suffix:
-    '[' query ']'
+    '[' query ']' '?'?
 
 primary:
     'null'
@@ -97,7 +97,7 @@ primary:
     NUMBER
     STRING
     '.'
-    FIELD
+    FIELD '?'?
 ```
 
 

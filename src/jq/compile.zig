@@ -13,6 +13,7 @@ pub const Opcode = enum {
     subexp_begin,
     subexp_end,
     index,
+    index_opt,
     add,
     sub,
     mul,
@@ -37,6 +38,7 @@ pub const Instr = union(Opcode) {
     subexp_begin,
     subexp_end,
     index,
+    index_opt,
     add,
     sub,
     mul,
@@ -60,16 +62,16 @@ fn compileExpr(allocator: std.mem.Allocator, compile_allocator: std.mem.Allocato
 
     switch (ast.*) {
         .identity => try instrs.append(allocator, .nop),
-        .index => |index| {
-            const base_instrs = try compileExpr(allocator, compile_allocator, index.base);
+        .index => |idx| {
+            const base_instrs = try compileExpr(allocator, compile_allocator, idx.base);
             defer allocator.free(base_instrs);
-            const index_instrs = try compileExpr(allocator, compile_allocator, index.index);
+            const index_instrs = try compileExpr(allocator, compile_allocator, idx.index);
             defer allocator.free(index_instrs);
             try instrs.appendSlice(allocator, base_instrs);
             try instrs.append(allocator, .subexp_begin);
             try instrs.appendSlice(allocator, index_instrs);
             try instrs.append(allocator, .subexp_end);
-            try instrs.append(allocator, .index);
+            try instrs.append(allocator, if (idx.is_optional) .index_opt else .index);
         },
         .literal => |idx| try instrs.append(allocator, .{ .@"const" = idx }),
         .binary_expr => |binary_expr| {

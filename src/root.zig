@@ -124,6 +124,18 @@ test "comma operator" {
     try testRunMultiple(&.{ "12", "34", "56" }, "{\"a\":12,\"b\":34,\"c\":56}", ".a,.b,.c");
 }
 
+test "optional index" {
+    try testRun("1", "[1,2,3]", ".[0]?");
+    try testRun("null", "[1,2,3]", ".[5]?");
+    try testRun("null", "null", ".[0]?");
+    try testRun("null", "123", ".[0]?");
+
+    try testRun("123", "{\"a\":123}", ".a?");
+    try testRun("null", "{\"a\":123}", ".b?");
+    try testRun("null", "null", ".a?");
+    try testRun("null", "[1,2,3]", ".a?");
+}
+
 test "comparison operators" {
     try testRun("true", "null", "1 == 1");
     try testRun("false", "null", "1 == 2");

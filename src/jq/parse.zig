@@ -45,7 +45,7 @@ pub const BinaryOp = enum {
 
 pub const Ast = union(AstKind) {
     identity,
-    index: struct { base: *Ast, index: *Ast },
+    index: struct { base: *Ast, index: *Ast, is_optional: bool },
     literal: ConstIndex,
     binary_expr: struct { op: BinaryOp, lhs: *Ast, rhs: *Ast },
     pipe: struct { lhs: *Ast, rhs: *Ast },
@@ -388,6 +388,14 @@ const Parser = struct {
             },
             .field => |name| {
                 _ = try self.tokens.next();
+                const is_optional = blk: {
+                    const token = self.tokens.peek() catch break :blk false;
+                    if (token.kind() == .question) {
+                        _ = try self.tokens.next();
+                        break :blk true;
+                    }
+                    break :blk false;
+                };
                 const base_ast = try self.parse_allocator.create(Ast);
                 base_ast.* = .identity;
                 try self.constants.append(self.allocator, .{ .string = try self.allocator.dupe(u8, name) });
@@ -395,7 +403,7 @@ const Parser = struct {
                 const key_ast = try self.parse_allocator.create(Ast);
                 key_ast.* = .{ .literal = idx };
                 const ast = try self.parse_allocator.create(Ast);
-                ast.* = .{ .index = .{ .base = base_ast, .index = key_ast } };
+                ast.* = .{ .index = .{ .base = base_ast, .index = key_ast, .is_optional = is_optional } };
                 return ast;
             },
             else => return error.InvalidQuery,
@@ -407,13 +415,22 @@ const Parser = struct {
         const index_token = try self.tokens.expect(.number);
         _ = try self.tokens.expect(.bracket_right);
 
+        const is_optional = blk: {
+            const token = self.tokens.peek() catch break :blk false;
+            if (token.kind() == .question) {
+                _ = try self.tokens.next();
+                break :blk true;
+            }
+            break :blk false;
+        };
+
         try self.constants.append(self.allocator, .{ .integer = @intFromFloat(index_token.number) });
         const idx: ConstIndex = @enumFromInt(self.constants.items.len - 1);
         const index_node = try self.parse_allocator.create(Ast);
         index_node.* = .{ .literal = idx };
 
         const ast = try self.parse_allocator.create(Ast);
-        ast.* = .{ .index = .{ .base = base, .index = index_node } };
+        ast.* = .{ .index = .{ .base = base, .index = index_node, .is_optional = is_optional } };
         return ast;
     }
 };

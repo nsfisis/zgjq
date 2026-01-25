@@ -196,6 +196,14 @@ pub const Runtime = struct {
                     const result = try jv.ops.index(base, key);
                     try self.values.push(result);
                 },
+                .index_opt => {
+                    std.debug.assert(self.values.ensureSize(2));
+
+                    const base = self.values.pop();
+                    const key = self.values.pop();
+                    const result = jv.ops.index(base, key) catch .null;
+                    try self.values.push(result);
+                },
                 .add => {
                     std.debug.assert(self.values.ensureSize(3));
 
