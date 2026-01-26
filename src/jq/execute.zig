@@ -187,12 +187,7 @@ pub const Runtime = struct {
                     std.debug.assert(self.values.ensureSize(1));
 
                     const value = self.values.pop();
-                    const is_falsy = switch (value) {
-                        .null => true,
-                        .bool => |b| !b,
-                        else => false,
-                    };
-                    if (is_falsy) {
+                    if (jv.ops.isFalsy(value)) {
                         self.pc += offset - 1;
                     }
                     // FIXME: optimize pop and push
@@ -334,12 +329,7 @@ pub const Runtime = struct {
                     _ = self.values.pop();
                     const lhs = self.values.pop();
                     const rhs = self.values.pop();
-                    const is_falsy = switch (lhs) {
-                        .null => true,
-                        .bool => |b| !b,
-                        else => false,
-                    };
-                    try self.values.push(if (is_falsy) rhs else lhs);
+                    try self.values.push(if (jv.ops.isFalsy(lhs)) rhs else lhs);
                 },
                 .@"const" => |idx| {
                     std.debug.assert(self.values.ensureSize(1));

@@ -186,3 +186,35 @@ test "compare different types" {
     try std.testing.expectError(error.InvalidType, compare(.{ .integer = 1 }, .{ .string = "1" }, .eq));
     try std.testing.expectError(error.InvalidType, compare(.null, .{ .integer = 0 }, .eq));
 }
+
+pub fn isFalsy(value: Value) bool {
+    return switch (value) {
+        .null => true,
+        .bool => |b| !b,
+        else => false,
+    };
+}
+
+pub fn isTruthy(value: Value) bool {
+    return !isFalsy(value);
+}
+
+test "isFalsy" {
+    try std.testing.expect(isFalsy(.null));
+    try std.testing.expect(isFalsy(.{ .bool = false }));
+    try std.testing.expect(!isFalsy(.{ .bool = true }));
+    try std.testing.expect(!isFalsy(.{ .integer = 0 }));
+    try std.testing.expect(!isFalsy(.{ .integer = 1 }));
+    try std.testing.expect(!isFalsy(.{ .string = "" }));
+    try std.testing.expect(!isFalsy(.{ .string = "hello" }));
+}
+
+test "isTruthy" {
+    try std.testing.expect(!isTruthy(.null));
+    try std.testing.expect(!isTruthy(.{ .bool = false }));
+    try std.testing.expect(isTruthy(.{ .bool = true }));
+    try std.testing.expect(isTruthy(.{ .integer = 0 }));
+    try std.testing.expect(isTruthy(.{ .integer = 1 }));
+    try std.testing.expect(isTruthy(.{ .string = "" }));
+    try std.testing.expect(isTruthy(.{ .string = "hello" }));
+}
