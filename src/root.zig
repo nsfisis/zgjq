@@ -254,3 +254,24 @@ test "or operator" {
     try testRun("true", "{\"a\":false,\"b\":true}", ".a or .b");
     try testRun("false", "{\"a\":false,\"b\":false}", ".a or .b");
 }
+
+test "alternative operator" {
+    try testRun("\"default\"", "null", ". // \"default\"");
+    try testRun("\"hello\"", "\"hello\"", ". // \"default\"");
+
+    try testRun("\"default\"", "false", ". // \"default\"");
+    try testRun("true", "true", ". // \"default\"");
+
+    try testRun("123", "{\"a\":123}", ".a // \"default\"");
+    try testRun("\"default\"", "{\"a\":123}", ".b // \"default\"");
+    try testRun("\"default\"", "{\"a\":null}", ".a // \"default\"");
+
+    try testRun("\"third\"", "null", "null // false // \"third\"");
+    try testRun("\"first\"", "null", "\"first\" // \"second\" // \"third\"");
+
+    try testRun("0", "0", ". // 42");
+    try testRun("\"\"", "\"\"", ". // \"default\"");
+
+    try testRun("[]", "[]", ". // \"default\"");
+    try testRun("{}", "{}", ". // \"default\"");
+}

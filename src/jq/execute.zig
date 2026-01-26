@@ -328,6 +328,19 @@ pub const Runtime = struct {
                     const result = try jv.ops.compare(lhs, rhs, .ge);
                     try self.values.push(.{ .bool = result });
                 },
+                .alt => {
+                    std.debug.assert(self.values.ensureSize(3));
+
+                    _ = self.values.pop();
+                    const lhs = self.values.pop();
+                    const rhs = self.values.pop();
+                    const is_falsy = switch (lhs) {
+                        .null => true,
+                        .bool => |b| !b,
+                        else => false,
+                    };
+                    try self.values.push(if (is_falsy) rhs else lhs);
+                },
                 .@"const" => |idx| {
                     std.debug.assert(self.values.ensureSize(1));
 

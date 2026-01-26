@@ -28,6 +28,7 @@ pub const Opcode = enum {
     gt,
     le,
     ge,
+    alt,
     @"const",
     const_true,
     const_false,
@@ -58,6 +59,7 @@ pub const Instr = union(Opcode) {
     gt,
     le,
     ge,
+    alt,
     @"const": ConstIndex,
     const_true,
     const_false,
@@ -108,6 +110,7 @@ const Codegen = struct {
                     .gt => .gt,
                     .le => .le,
                     .ge => .ge,
+                    .alt => .alt,
                     else => return error.Unimplemented,
                 };
                 try self.emit(op_instr);
