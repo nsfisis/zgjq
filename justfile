@@ -4,6 +4,9 @@ help:
 build: fmt
     @zig build
 
+run QUERY:
+    @zig build run -- {{QUERY}}
+
 test: fmt
     @zig build test
 
