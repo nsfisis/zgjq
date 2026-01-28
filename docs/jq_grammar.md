@@ -98,6 +98,9 @@ primary:
     STRING
     '.'
     FIELD '?'?
+    '[' ']'
+    '{' '}'
+    '[' query ']'
 ```
 
 

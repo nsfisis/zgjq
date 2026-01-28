@@ -1,8 +1,8 @@
 const std = @import("std");
 const jv = @import("../jv.zig");
+const ConstIndex = @import("./constant_table.zig").ConstIndex;
 const Token = @import("./tokenize.zig").Token;
 const TokenKind = @import("./tokenize.zig").TokenKind;
-const ConstIndex = @import("./codegen.zig").ConstIndex;
 
 pub const ParseError = error{
     UnexpectedEnd,
@@ -18,6 +18,7 @@ pub const AstKind = enum {
     and_expr,
     pipe,
     comma,
+    construct_array,
 };
 
 pub const BinaryOp = enum {
@@ -52,6 +53,7 @@ pub const Ast = union(AstKind) {
     and_expr: struct { lhs: *Ast, rhs: *Ast },
     pipe: struct { lhs: *Ast, rhs: *Ast },
     comma: struct { lhs: *Ast, rhs: *Ast },
+    construct_array: struct { items: *Ast },
 
     pub fn kind(self: @This()) AstKind {
         return self;
@@ -117,7 +119,9 @@ const Parser = struct {
     constants: *std.ArrayList(jv.Value),
 
     fn parseProgram(self: *Self) Error!*Ast {
-        return self.parseBody();
+        const ret = try self.parseBody();
+        _ = try self.tokens.expect(.end);
+        return ret;
     }
 
     fn parseBody(self: *Self) Error!*Ast {
@@ -139,7 +143,6 @@ const Parser = struct {
             } };
             lhs = ast;
         }
-        _ = try self.tokens.expect(.end);
         return lhs;
     }
 
@@ -309,27 +312,21 @@ const Parser = struct {
         switch (first_token) {
             .keyword_null => {
                 _ = try self.tokens.next();
-                try self.constants.append(self.allocator, .null);
-                const idx: ConstIndex = @enumFromInt(self.constants.items.len - 1);
                 const null_node = try self.compile_allocator.create(Ast);
-                null_node.* = .{ .literal = idx };
+                null_node.* = .{ .literal = .null };
                 return null_node;
-            },
-            .keyword_true => {
-                _ = try self.tokens.next();
-                try self.constants.append(self.allocator, .{ .bool = true });
-                const idx: ConstIndex = @enumFromInt(self.constants.items.len - 1);
-                const true_node = try self.compile_allocator.create(Ast);
-                true_node.* = .{ .literal = idx };
-                return true_node;
             },
             .keyword_false => {
                 _ = try self.tokens.next();
-                try self.constants.append(self.allocator, .{ .bool = false });
-                const idx: ConstIndex = @enumFromInt(self.constants.items.len - 1);
                 const false_node = try self.compile_allocator.create(Ast);
-                false_node.* = .{ .literal = idx };
+                false_node.* = .{ .literal = .false };
                 return false_node;
+            },
+            .keyword_true => {
+                _ = try self.tokens.next();
+                const true_node = try self.compile_allocator.create(Ast);
+                true_node.* = .{ .literal = .true };
+                return true_node;
             },
             .number => |f| {
                 _ = try self.tokens.next();
@@ -360,12 +357,17 @@ const Parser = struct {
             },
             .bracket_left => {
                 _ = try self.tokens.next();
-                _ = try self.tokens.expect(.bracket_right);
-                try self.constants.append(self.allocator, .{ .array = jv.Array.init(self.allocator) });
-                const idx: ConstIndex = @enumFromInt(self.constants.items.len - 1);
-                const array_node = try self.compile_allocator.create(Ast);
-                array_node.* = .{ .literal = idx };
-                return array_node;
+                if (self.tokens.consumeIf(.bracket_right)) {
+                    const array_node = try self.compile_allocator.create(Ast);
+                    array_node.* = .{ .literal = .empty_array };
+                    return array_node;
+                } else {
+                    const inner_query = try self.parseQuery();
+                    _ = try self.tokens.expect(.bracket_right);
+                    const array_node = try self.compile_allocator.create(Ast);
+                    array_node.* = .{ .construct_array = .{ .items = inner_query } };
+                    return array_node;
+                }
             },
             .brace_left => {
                 _ = try self.tokens.next();
@@ -414,5 +416,5 @@ pub fn parse(allocator: std.mem.Allocator, compile_allocator: std.mem.Allocator,
         .tokens = &token_stream,
         .constants = constants,
     };
-    return parser.parseQuery();
+    return try parser.parseProgram();
 }

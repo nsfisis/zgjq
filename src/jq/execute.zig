@@ -114,19 +114,37 @@ pub const Runtime = struct {
     instrs: []const Instr,
     pc: usize,
     constants: std.ArrayList(jv.Value),
+    variables: std.ArrayList(jv.Value),
 
     pub fn init(allocator: std.mem.Allocator) !Self {
+        // The order of this table must match with ConstIndex's order.
+        var constants = try std.ArrayList(jv.Value).initCapacity(allocator, 4);
+        try constants.append(allocator, .null);
+        try constants.append(allocator, .{ .bool = false });
+        try constants.append(allocator, .{ .bool = true });
+        try constants.append(allocator, .{ .array = jv.Array.init(allocator) });
+
         return .{
             .allocator = allocator,
             .values = try ValueStack.init(allocator),
             .forks = .{},
             .instrs = &[_]Instr{},
             .pc = 0,
-            .constants = .{},
+            .constants = constants,
+            .variables = .{},
         };
     }
 
     pub fn deinit(self: *Self) void {
+        for (self.variables.items) |*value| {
+            switch (value.*) {
+                .string => |s| self.allocator.free(s),
+                .array => |*a| a.deinit(),
+                .object => |*o| o.deinit(),
+                else => {},
+            }
+        }
+        self.variables.deinit(self.allocator);
         for (self.constants.items) |*value| {
             switch (value.*) {
                 .string => |s| self.allocator.free(s),
@@ -169,7 +187,7 @@ pub const Runtime = struct {
     pub fn next(self: *Self) !?jv.Value {
         std.debug.assert(self.instrs.len > 0);
 
-        self.restore_stack();
+        _ = self.restore_stack();
 
         while (self.pc < self.instrs.len) : (self.pc += 1) {
             const cur = self.instrs[self.pc];
@@ -195,6 +213,11 @@ pub const Runtime = struct {
                 },
                 .fork => |offset| {
                     try self.save_stack(self.pc + offset);
+                },
+                .backtrack => {
+                    if (self.restore_stack()) {
+                        self.pc -= 1;
+                    }
                 },
                 .dup => {
                     std.debug.assert(self.values.ensureSize(1));
@@ -337,17 +360,25 @@ pub const Runtime = struct {
                     _ = self.values.pop();
                     try self.values.push(self.constants.items[@intFromEnum(idx)]);
                 },
-                .const_true => {
-                    std.debug.assert(self.values.ensureSize(1));
-
-                    _ = self.values.pop();
-                    try self.values.push(.{ .bool = true });
+                .load => |idx| {
+                    try self.values.push(self.variables.items[@intFromEnum(idx)]);
                 },
-                .const_false => {
+                .store => |idx| {
                     std.debug.assert(self.values.ensureSize(1));
 
-                    _ = self.values.pop();
-                    try self.values.push(.{ .bool = false });
+                    // TODO: Allocate all local variables at startup.
+                    while (self.variables.items.len <= @intFromEnum(idx)) {
+                        try self.variables.append(self.allocator, .null);
+                    }
+                    self.variables.items[@intFromEnum(idx)] = self.values.pop();
+                },
+                .append => |idx| {
+                    std.debug.assert(self.values.ensureSize(1));
+
+                    switch (self.variables.items[@intFromEnum(idx)]) {
+                        .array => |*a| try a.append(self.values.pop()),
+                        else => unreachable,
+                    }
                 },
             }
         }
@@ -360,10 +391,12 @@ pub const Runtime = struct {
         try self.values.save();
     }
 
-    fn restore_stack(self: *Self) void {
+    fn restore_stack(self: *Self) bool {
         if (self.forks.pop()) |target_pc| {
             self.pc = target_pc;
             self.values.restore();
+            return true;
         }
+        return false;
     }
 };

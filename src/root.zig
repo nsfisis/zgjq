@@ -275,3 +275,58 @@ test "alternative operator" {
     try testRun("[]", "[]", ". // \"default\"");
     try testRun("{}", "{}", ". // \"default\"");
 }
+
+test "array constructor" {
+    try testRun(
+        \\[
+        \\  1,
+        \\  2,
+        \\  3
+        \\]
+    , "null", "[1,2,3]");
+    try testRun(
+        \\[
+        \\  1,
+        \\  2
+        \\]
+    , "{\"a\":1,\"b\":2}", "[.a, .b]");
+    try testRun(
+        \\[
+        \\  3
+        \\]
+    , "null", "[1 + 2]");
+    try testRun(
+        \\[
+        \\  1,
+        \\  2,
+        \\  3
+        \\]
+    , "[1,2,3]", "[.[0], .[1], .[2]]");
+    try testRun(
+        \\[
+        \\  [
+        \\    1,
+        \\    2,
+        \\    3
+        \\  ]
+        \\]
+    , "[1,2,3]", "[.]");
+    try testRun(
+        \\[
+        \\  true,
+        \\  false
+        \\]
+    , "null", "[true, false]");
+    try testRun(
+        \\[
+        \\  1,
+        \\  [
+        \\    1,
+        \\    [
+        \\      1,
+        \\      2
+        \\    ]
+        \\  ]
+        \\]
+    , "{\"a\":1,\"b\":2}", "[.a, [.a, [.a, .b]]]");
+}
