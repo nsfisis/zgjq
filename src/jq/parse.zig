@@ -372,7 +372,7 @@ const Parser = struct {
             .brace_left => {
                 _ = try self.tokens.next();
                 _ = try self.tokens.expect(.brace_right);
-                try self.constants.append(self.allocator, jv.Value.initObject(jv.Object.init(self.allocator)));
+                try self.constants.append(self.allocator, jv.Value.initObject(try jv.Object.init(self.allocator)));
                 const idx: ConstIndex = @enumFromInt(self.constants.items.len - 1);
                 const object_node = try self.compile_allocator.create(Ast);
                 object_node.* = .{ .literal = idx };

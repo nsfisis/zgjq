@@ -9,14 +9,14 @@ pub const OpsError = error{
 };
 
 pub fn index(base: Value, key: Value) OpsError!Value {
-    return switch (base.kind()) {
-        .array => blk: {
-            if (key.kind() != .integer) return error.InvalidType;
-            break :blk base.arrayGet(@intCast(key.integer()));
+    return switch (base) {
+        .array => |a| switch (key) {
+            .integer => |i| a.get(@intCast(i)),
+            else => error.InvalidType,
         },
-        .object => blk: {
-            if (key.kind() != .string) return error.InvalidType;
-            break :blk base.objectGet(key.string()) orelse Value.null;
+        .object => |o| switch (key) {
+            .string => |s| o.get(s) orelse Value.null,
+            else => error.InvalidType,
         },
         .null => Value.null,
         else => error.InvalidType,
@@ -38,15 +38,14 @@ pub fn compare(lhs: Value, rhs: Value, op: CompareOp) OpsError!bool {
         return error.InvalidType;
     }
 
-    return switch (lhs_tag) {
+    return switch (lhs) {
         .null => switch (op) {
             .eq => true,
             .ne => false,
             .lt, .gt, .le, .ge => error.Unimplemented,
         },
-        .bool => {
-            const lhs_bool = lhs.boolean();
-            const rhs_bool = rhs.boolean();
+        .bool => |lhs_bool| {
+            const rhs_bool = rhs.bool;
             return switch (op) {
                 .eq => lhs_bool == rhs_bool,
                 .ne => lhs_bool != rhs_bool,
@@ -54,9 +53,8 @@ pub fn compare(lhs: Value, rhs: Value, op: CompareOp) OpsError!bool {
             };
         },
         .integer, .float => compareNumbers(lhs, rhs, op),
-        .string => {
-            const lhs_str = lhs.string();
-            const rhs_str = rhs.string();
+        .string => |lhs_str| {
+            const rhs_str = rhs.string;
             const order = std.mem.order(u8, lhs_str, rhs_str);
             return switch (op) {
                 .eq => order == .eq,
@@ -75,19 +73,18 @@ pub fn compare(lhs: Value, rhs: Value, op: CompareOp) OpsError!bool {
             .eq, .ne => error.Unimplemented,
             .lt, .gt, .le, .ge => error.Unimplemented,
         },
-        .number_string => error.Unimplemented,
     };
 }
 
 fn compareNumbers(lhs: Value, rhs: Value, op: CompareOp) bool {
-    const lhs_f: f64 = switch (lhs.kind()) {
-        .integer => @floatFromInt(lhs.integer()),
-        .float => lhs.float(),
+    const lhs_f: f64 = switch (lhs) {
+        .integer => |i| @floatFromInt(i),
+        .float => |f| f,
         else => unreachable,
     };
-    const rhs_f: f64 = switch (rhs.kind()) {
-        .integer => @floatFromInt(rhs.integer()),
-        .float => rhs.float(),
+    const rhs_f: f64 = switch (rhs) {
+        .integer => |i| @floatFromInt(i),
+        .float => |f| f,
         else => unreachable,
     };
     return switch (op) {
@@ -101,11 +98,11 @@ fn compareNumbers(lhs: Value, rhs: Value, op: CompareOp) bool {
 }
 
 test "index array" {
-    var arr = Array.init(std.testing.allocator);
-    defer arr.deinit();
-    try arr.append(Value.initInteger(10));
-    try arr.append(Value.initInteger(20));
-    try arr.append(Value.initInteger(30));
+    var arr = try Array.init(std.testing.allocator);
+    defer arr.deinit(std.testing.allocator);
+    try arr.append(std.testing.allocator, Value.initInteger(10));
+    try arr.append(std.testing.allocator, Value.initInteger(20));
+    try arr.append(std.testing.allocator, Value.initInteger(30));
 
     const base = Value.initArray(arr);
 
@@ -116,10 +113,10 @@ test "index array" {
 }
 
 test "index object" {
-    var obj = Object.init(std.testing.allocator);
-    defer obj.deinit();
-    try obj.set("foo", Value.initInteger(1));
-    try obj.set("bar", Value.initInteger(2));
+    var obj = try Object.init(std.testing.allocator);
+    defer obj.deinit(std.testing.allocator);
+    try obj.set(std.testing.allocator, "foo", Value.initInteger(1));
+    try obj.set(std.testing.allocator, "bar", Value.initInteger(2));
 
     const base = Value.initObject(obj);
 
@@ -184,9 +181,9 @@ test "compare different types" {
 }
 
 pub fn isFalsy(value: Value) bool {
-    return switch (value.kind()) {
+    return switch (value) {
         .null => true,
-        .bool => !value.boolean(),
+        .bool => |b| !b,
         else => false,
     };
 }

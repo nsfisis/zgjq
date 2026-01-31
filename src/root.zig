@@ -12,6 +12,7 @@ pub fn run(allocator: std.mem.Allocator, input: []const u8, query: []const u8) !
     try runtime.compileFromSlice(query);
     try runtime.start(json);
     const result = try runtime.next() orelse return error.NoResult;
+    defer result.deinit(allocator);
     const output = try jv.stringify(allocator, result);
     return output;
 }
@@ -34,6 +35,7 @@ fn testRunMultiple(expected: []const []const u8, input: []const u8, query: []con
 
     for (expected) |ex| {
         const result_value = try runtime.next() orelse return error.NoResult;
+        defer result_value.deinit(allocator);
         const result = try jv.stringify(allocator, result_value);
         defer allocator.free(result);
         try std.testing.expectEqualStrings(ex, result);

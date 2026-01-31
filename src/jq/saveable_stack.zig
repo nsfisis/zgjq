@@ -101,6 +101,10 @@ pub fn SaveableStack(comptime T: type) type {
             return seg.previous_position.offset == 0;
         }
 
+        pub fn isBeyondSavepointBoundary(self: *Self) bool {
+            return self.activeSegment().len() == 0;
+        }
+
         pub fn pop(self: *Self) T {
             std.debug.assert(!self.isEmpty());
 
