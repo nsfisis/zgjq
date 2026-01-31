@@ -39,41 +39,41 @@ const ValueStack = struct {
 
     pub fn popInteger(self: *Self) ExecuteError!i64 {
         const value = self.pop();
-        return switch (value) {
-            .integer => |i| i,
+        return switch (value.kind()) {
+            .integer => value.integer(),
             else => error.InvalidType,
         };
     }
 
     pub fn popNumber(self: *Self) ExecuteError!f64 {
         const value = self.pop();
-        return switch (value) {
-            .integer => |i| @floatFromInt(i),
-            .float => |f| f,
+        return switch (value.kind()) {
+            .integer => @floatFromInt(value.integer()),
+            .float => value.float(),
             else => error.InvalidType,
         };
     }
 
     pub fn popString(self: *Self) ExecuteError![]const u8 {
         const value = self.pop();
-        return switch (value) {
-            .string => |s| s,
+        return switch (value.kind()) {
+            .string => value.string(),
             else => error.InvalidType,
         };
     }
 
     pub fn popArray(self: *Self) ExecuteError!jv.Array {
         const value = self.pop();
-        return switch (value) {
-            .array => |a| a,
+        return switch (value.kind()) {
+            .array => value.array(),
             else => error.InvalidType,
         };
     }
 
     pub fn popObject(self: *Self) ExecuteError!jv.Object {
         const value = self.pop();
-        return switch (value) {
-            .object => |o| o,
+        return switch (value.kind()) {
+            .object => value.object(),
             else => error.InvalidType,
         };
     }
@@ -119,10 +119,10 @@ pub const Runtime = struct {
     pub fn init(allocator: std.mem.Allocator) !Self {
         // The order of this table must match with ConstIndex's order.
         var constants = try std.ArrayList(jv.Value).initCapacity(allocator, 4);
-        try constants.append(allocator, .null);
-        try constants.append(allocator, .{ .bool = false });
-        try constants.append(allocator, .{ .bool = true });
-        try constants.append(allocator, .{ .array = jv.Array.init(allocator) });
+        try constants.append(allocator, jv.Value.null);
+        try constants.append(allocator, jv.Value.false);
+        try constants.append(allocator, jv.Value.true);
+        try constants.append(allocator, jv.Value.initArray(jv.Array.init(allocator)));
 
         return .{
             .allocator = allocator,
@@ -137,21 +137,11 @@ pub const Runtime = struct {
 
     pub fn deinit(self: *Self) void {
         for (self.variables.items) |*value| {
-            switch (value.*) {
-                .string => |s| self.allocator.free(s),
-                .array => |*a| a.deinit(),
-                .object => |*o| o.deinit(),
-                else => {},
-            }
+            value.deinit(self.allocator);
         }
         self.variables.deinit(self.allocator);
         for (self.constants.items) |*value| {
-            switch (value.*) {
-                .string => |s| self.allocator.free(s),
-                .array => |*a| a.deinit(),
-                .object => |*o| o.deinit(),
-                else => {},
-            }
+            value.deinit(self.allocator);
         }
         self.constants.deinit(self.allocator);
         self.allocator.free(self.instrs);
@@ -244,7 +234,7 @@ pub const Runtime = struct {
 
                     const base = self.values.pop();
                     const key = self.values.pop();
-                    const result = jv.ops.index(base, key) catch .null;
+                    const result = jv.ops.index(base, key) catch jv.Value.null;
                     try self.values.push(result);
                 },
                 .add => {
@@ -254,7 +244,7 @@ pub const Runtime = struct {
                     const lhs = try self.values.popInteger();
                     const rhs = try self.values.popInteger();
                     const result = lhs + rhs;
-                    try self.values.push(.{ .integer = result });
+                    try self.values.push(jv.Value.initInteger(result));
                 },
                 .sub => {
                     std.debug.assert(self.values.ensureSize(3));
@@ -263,7 +253,7 @@ pub const Runtime = struct {
                     const lhs = try self.values.popInteger();
                     const rhs = try self.values.popInteger();
                     const result = lhs - rhs;
-                    try self.values.push(.{ .integer = result });
+                    try self.values.push(jv.Value.initInteger(result));
                 },
                 .mul => {
                     std.debug.assert(self.values.ensureSize(3));
@@ -272,7 +262,7 @@ pub const Runtime = struct {
                     const lhs = try self.values.popInteger();
                     const rhs = try self.values.popInteger();
                     const result = lhs * rhs;
-                    try self.values.push(.{ .integer = result });
+                    try self.values.push(jv.Value.initInteger(result));
                 },
                 .div => {
                     std.debug.assert(self.values.ensureSize(3));
@@ -281,7 +271,7 @@ pub const Runtime = struct {
                     const lhs = try self.values.popInteger();
                     const rhs = try self.values.popInteger();
                     const result = @divTrunc(lhs, rhs);
-                    try self.values.push(.{ .integer = result });
+                    try self.values.push(jv.Value.initInteger(result));
                 },
                 .mod => {
                     std.debug.assert(self.values.ensureSize(3));
@@ -290,7 +280,7 @@ pub const Runtime = struct {
                     const lhs = try self.values.popInteger();
                     const rhs = try self.values.popInteger();
                     const result = @mod(lhs, rhs);
-                    try self.values.push(.{ .integer = result });
+                    try self.values.push(jv.Value.initInteger(result));
                 },
                 .eq => {
                     std.debug.assert(self.values.ensureSize(3));
@@ -299,7 +289,7 @@ pub const Runtime = struct {
                     const lhs = self.values.pop();
                     const rhs = self.values.pop();
                     const result = try jv.ops.compare(lhs, rhs, .eq);
-                    try self.values.push(.{ .bool = result });
+                    try self.values.push(jv.Value.initBool(result));
                 },
                 .ne => {
                     std.debug.assert(self.values.ensureSize(3));
@@ -308,7 +298,7 @@ pub const Runtime = struct {
                     const lhs = self.values.pop();
                     const rhs = self.values.pop();
                     const result = try jv.ops.compare(lhs, rhs, .ne);
-                    try self.values.push(.{ .bool = result });
+                    try self.values.push(jv.Value.initBool(result));
                 },
                 .lt => {
                     std.debug.assert(self.values.ensureSize(3));
@@ -317,7 +307,7 @@ pub const Runtime = struct {
                     const lhs = self.values.pop();
                     const rhs = self.values.pop();
                     const result = try jv.ops.compare(lhs, rhs, .lt);
-                    try self.values.push(.{ .bool = result });
+                    try self.values.push(jv.Value.initBool(result));
                 },
                 .gt => {
                     std.debug.assert(self.values.ensureSize(3));
@@ -326,7 +316,7 @@ pub const Runtime = struct {
                     const lhs = self.values.pop();
                     const rhs = self.values.pop();
                     const result = try jv.ops.compare(lhs, rhs, .gt);
-                    try self.values.push(.{ .bool = result });
+                    try self.values.push(jv.Value.initBool(result));
                 },
                 .le => {
                     std.debug.assert(self.values.ensureSize(3));
@@ -335,7 +325,7 @@ pub const Runtime = struct {
                     const lhs = self.values.pop();
                     const rhs = self.values.pop();
                     const result = try jv.ops.compare(lhs, rhs, .le);
-                    try self.values.push(.{ .bool = result });
+                    try self.values.push(jv.Value.initBool(result));
                 },
                 .ge => {
                     std.debug.assert(self.values.ensureSize(3));
@@ -344,7 +334,7 @@ pub const Runtime = struct {
                     const lhs = self.values.pop();
                     const rhs = self.values.pop();
                     const result = try jv.ops.compare(lhs, rhs, .ge);
-                    try self.values.push(.{ .bool = result });
+                    try self.values.push(jv.Value.initBool(result));
                 },
                 .alt => {
                     std.debug.assert(self.values.ensureSize(3));
@@ -368,17 +358,14 @@ pub const Runtime = struct {
 
                     // TODO: Allocate all local variables at startup.
                     while (self.variables.items.len <= @intFromEnum(idx)) {
-                        try self.variables.append(self.allocator, .null);
+                        try self.variables.append(self.allocator, jv.Value.null);
                     }
                     self.variables.items[@intFromEnum(idx)] = self.values.pop();
                 },
                 .append => |idx| {
                     std.debug.assert(self.values.ensureSize(1));
 
-                    switch (self.variables.items[@intFromEnum(idx)]) {
-                        .array => |*a| try a.append(self.values.pop()),
-                        else => unreachable,
-                    }
+                    try self.variables.items[@intFromEnum(idx)].arrayAppend(self.values.pop());
                 },
             }
         }

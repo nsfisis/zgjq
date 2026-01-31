@@ -9,22 +9,16 @@ pub const OpsError = error{
 };
 
 pub fn index(base: Value, key: Value) OpsError!Value {
-    return switch (base) {
-        .array => |arr| blk: {
-            const idx: usize = @intCast(switch (key) {
-                .integer => |i| i,
-                else => return error.InvalidType,
-            });
-            break :blk if (idx < arr.items.len) arr.items[idx] else .null;
+    return switch (base.kind()) {
+        .array => blk: {
+            if (key.kind() != .integer) return error.InvalidType;
+            break :blk base.arrayGet(@intCast(key.integer()));
         },
-        .object => |obj| blk: {
-            const k = switch (key) {
-                .string => |s| s,
-                else => return error.InvalidType,
-            };
-            break :blk obj.get(k) orelse .null;
+        .object => blk: {
+            if (key.kind() != .string) return error.InvalidType;
+            break :blk base.objectGet(key.string()) orelse Value.null;
         },
-        .null => .null,
+        .null => Value.null,
         else => error.InvalidType,
     };
 }
@@ -32,8 +26,8 @@ pub fn index(base: Value, key: Value) OpsError!Value {
 pub const CompareOp = enum { eq, ne, lt, gt, le, ge };
 
 pub fn compare(lhs: Value, rhs: Value, op: CompareOp) OpsError!bool {
-    const lhs_tag = std.meta.activeTag(lhs);
-    const rhs_tag = std.meta.activeTag(rhs);
+    const lhs_tag = lhs.kind();
+    const rhs_tag = rhs.kind();
 
     if (lhs_tag != rhs_tag) {
         const lhs_is_number = lhs_tag == .integer or lhs_tag == .float;
@@ -44,14 +38,15 @@ pub fn compare(lhs: Value, rhs: Value, op: CompareOp) OpsError!bool {
         return error.InvalidType;
     }
 
-    return switch (lhs) {
+    return switch (lhs_tag) {
         .null => switch (op) {
             .eq => true,
             .ne => false,
             .lt, .gt, .le, .ge => error.Unimplemented,
         },
-        .bool => |lhs_bool| {
-            const rhs_bool = rhs.bool;
+        .bool => {
+            const lhs_bool = lhs.boolean();
+            const rhs_bool = rhs.boolean();
             return switch (op) {
                 .eq => lhs_bool == rhs_bool,
                 .ne => lhs_bool != rhs_bool,
@@ -59,8 +54,9 @@ pub fn compare(lhs: Value, rhs: Value, op: CompareOp) OpsError!bool {
             };
         },
         .integer, .float => compareNumbers(lhs, rhs, op),
-        .string => |lhs_str| {
-            const rhs_str = rhs.string;
+        .string => {
+            const lhs_str = lhs.string();
+            const rhs_str = rhs.string();
             const order = std.mem.order(u8, lhs_str, rhs_str);
             return switch (op) {
                 .eq => order == .eq,
@@ -84,14 +80,14 @@ pub fn compare(lhs: Value, rhs: Value, op: CompareOp) OpsError!bool {
 }
 
 fn compareNumbers(lhs: Value, rhs: Value, op: CompareOp) bool {
-    const lhs_f: f64 = switch (lhs) {
-        .integer => |i| @floatFromInt(i),
-        .float => |f| f,
+    const lhs_f: f64 = switch (lhs.kind()) {
+        .integer => @floatFromInt(lhs.integer()),
+        .float => lhs.float(),
         else => unreachable,
     };
-    const rhs_f: f64 = switch (rhs) {
-        .integer => |i| @floatFromInt(i),
-        .float => |f| f,
+    const rhs_f: f64 = switch (rhs.kind()) {
+        .integer => @floatFromInt(rhs.integer()),
+        .float => rhs.float(),
         else => unreachable,
     };
     return switch (op) {
@@ -107,90 +103,90 @@ fn compareNumbers(lhs: Value, rhs: Value, op: CompareOp) bool {
 test "index array" {
     var arr = Array.init(std.testing.allocator);
     defer arr.deinit();
-    try arr.append(.{ .integer = 10 });
-    try arr.append(.{ .integer = 20 });
-    try arr.append(.{ .integer = 30 });
+    try arr.append(Value.initInteger(10));
+    try arr.append(Value.initInteger(20));
+    try arr.append(Value.initInteger(30));
 
-    const base = Value{ .array = arr };
+    const base = Value.initArray(arr);
 
-    try std.testing.expectEqual(Value{ .integer = 10 }, try index(base, .{ .integer = 0 }));
-    try std.testing.expectEqual(Value{ .integer = 20 }, try index(base, .{ .integer = 1 }));
-    try std.testing.expectEqual(Value{ .integer = 30 }, try index(base, .{ .integer = 2 }));
-    try std.testing.expectEqual(Value.null, try index(base, .{ .integer = 3 }));
+    try std.testing.expectEqual(Value.initInteger(10), try index(base, Value.initInteger(0)));
+    try std.testing.expectEqual(Value.initInteger(20), try index(base, Value.initInteger(1)));
+    try std.testing.expectEqual(Value.initInteger(30), try index(base, Value.initInteger(2)));
+    try std.testing.expectEqual(Value.null, try index(base, Value.initInteger(3)));
 }
 
 test "index object" {
     var obj = Object.init(std.testing.allocator);
     defer obj.deinit();
-    try obj.put("foo", .{ .integer = 1 });
-    try obj.put("bar", .{ .integer = 2 });
+    try obj.set("foo", Value.initInteger(1));
+    try obj.set("bar", Value.initInteger(2));
 
-    const base = Value{ .object = obj };
+    const base = Value.initObject(obj);
 
-    try std.testing.expectEqual(Value{ .integer = 1 }, try index(base, .{ .string = "foo" }));
-    try std.testing.expectEqual(Value{ .integer = 2 }, try index(base, .{ .string = "bar" }));
-    try std.testing.expectEqual(Value.null, try index(base, .{ .string = "baz" }));
+    try std.testing.expectEqual(Value.initInteger(1), try index(base, Value.initString("foo")));
+    try std.testing.expectEqual(Value.initInteger(2), try index(base, Value.initString("bar")));
+    try std.testing.expectEqual(Value.null, try index(base, Value.initString("baz")));
 }
 
 test "index null" {
-    try std.testing.expectEqual(Value.null, try index(.null, .{ .integer = 0 }));
-    try std.testing.expectEqual(Value.null, try index(.null, .{ .string = "foo" }));
+    try std.testing.expectEqual(Value.null, try index(Value.null, Value.initInteger(0)));
+    try std.testing.expectEqual(Value.null, try index(Value.null, Value.initString("foo")));
 }
 
 test "index invalid type" {
-    try std.testing.expectError(error.InvalidType, index(.{ .integer = 42 }, .{ .integer = 0 }));
-    try std.testing.expectError(error.InvalidType, index(.{ .string = "foo" }, .{ .integer = 0 }));
+    try std.testing.expectError(error.InvalidType, index(Value.initInteger(42), Value.initInteger(0)));
+    try std.testing.expectError(error.InvalidType, index(Value.initString("foo"), Value.initInteger(0)));
 }
 
 test "compare integers" {
-    try std.testing.expect(try compare(.{ .integer = 1 }, .{ .integer = 1 }, .eq));
-    try std.testing.expect(!try compare(.{ .integer = 1 }, .{ .integer = 2 }, .eq));
-    try std.testing.expect(try compare(.{ .integer = 1 }, .{ .integer = 2 }, .ne));
-    try std.testing.expect(try compare(.{ .integer = 1 }, .{ .integer = 2 }, .lt));
-    try std.testing.expect(try compare(.{ .integer = 2 }, .{ .integer = 1 }, .gt));
-    try std.testing.expect(try compare(.{ .integer = 1 }, .{ .integer = 1 }, .le));
-    try std.testing.expect(try compare(.{ .integer = 1 }, .{ .integer = 1 }, .ge));
+    try std.testing.expect(try compare(Value.initInteger(1), Value.initInteger(1), .eq));
+    try std.testing.expect(!try compare(Value.initInteger(1), Value.initInteger(2), .eq));
+    try std.testing.expect(try compare(Value.initInteger(1), Value.initInteger(2), .ne));
+    try std.testing.expect(try compare(Value.initInteger(1), Value.initInteger(2), .lt));
+    try std.testing.expect(try compare(Value.initInteger(2), Value.initInteger(1), .gt));
+    try std.testing.expect(try compare(Value.initInteger(1), Value.initInteger(1), .le));
+    try std.testing.expect(try compare(Value.initInteger(1), Value.initInteger(1), .ge));
 }
 
 test "compare floats" {
-    try std.testing.expect(try compare(.{ .float = 1.5 }, .{ .float = 1.5 }, .eq));
-    try std.testing.expect(try compare(.{ .float = 1.5 }, .{ .float = 2.5 }, .lt));
-    try std.testing.expect(try compare(.{ .float = 2.5 }, .{ .float = 1.5 }, .gt));
+    try std.testing.expect(try compare(Value.initFloat(1.5), Value.initFloat(1.5), .eq));
+    try std.testing.expect(try compare(Value.initFloat(1.5), Value.initFloat(2.5), .lt));
+    try std.testing.expect(try compare(Value.initFloat(2.5), Value.initFloat(1.5), .gt));
 }
 
 test "compare mixed numbers" {
-    try std.testing.expect(try compare(.{ .integer = 2 }, .{ .float = 2.0 }, .eq));
-    try std.testing.expect(try compare(.{ .float = 1.5 }, .{ .integer = 2 }, .lt));
-    try std.testing.expect(try compare(.{ .integer = 3 }, .{ .float = 2.5 }, .gt));
+    try std.testing.expect(try compare(Value.initInteger(2), Value.initFloat(2.0), .eq));
+    try std.testing.expect(try compare(Value.initFloat(1.5), Value.initInteger(2), .lt));
+    try std.testing.expect(try compare(Value.initInteger(3), Value.initFloat(2.5), .gt));
 }
 
 test "compare strings" {
-    try std.testing.expect(try compare(.{ .string = "abc" }, .{ .string = "abc" }, .eq));
-    try std.testing.expect(try compare(.{ .string = "abc" }, .{ .string = "abd" }, .ne));
-    try std.testing.expect(try compare(.{ .string = "abc" }, .{ .string = "abd" }, .lt));
-    try std.testing.expect(try compare(.{ .string = "abd" }, .{ .string = "abc" }, .gt));
+    try std.testing.expect(try compare(Value.initString("abc"), Value.initString("abc"), .eq));
+    try std.testing.expect(try compare(Value.initString("abc"), Value.initString("abd"), .ne));
+    try std.testing.expect(try compare(Value.initString("abc"), Value.initString("abd"), .lt));
+    try std.testing.expect(try compare(Value.initString("abd"), Value.initString("abc"), .gt));
 }
 
 test "compare booleans" {
-    try std.testing.expect(try compare(.{ .bool = true }, .{ .bool = true }, .eq));
-    try std.testing.expect(try compare(.{ .bool = false }, .{ .bool = false }, .eq));
-    try std.testing.expect(try compare(.{ .bool = true }, .{ .bool = false }, .ne));
+    try std.testing.expect(try compare(Value.initBool(true), Value.initBool(true), .eq));
+    try std.testing.expect(try compare(Value.initBool(false), Value.initBool(false), .eq));
+    try std.testing.expect(try compare(Value.initBool(true), Value.initBool(false), .ne));
 }
 
 test "compare null" {
-    try std.testing.expect(try compare(.null, .null, .eq));
-    try std.testing.expect(!try compare(.null, .null, .ne));
+    try std.testing.expect(try compare(Value.null, Value.null, .eq));
+    try std.testing.expect(!try compare(Value.null, Value.null, .ne));
 }
 
 test "compare different types" {
-    try std.testing.expectError(error.InvalidType, compare(.{ .integer = 1 }, .{ .string = "1" }, .eq));
-    try std.testing.expectError(error.InvalidType, compare(.null, .{ .integer = 0 }, .eq));
+    try std.testing.expectError(error.InvalidType, compare(Value.initInteger(1), Value.initString("1"), .eq));
+    try std.testing.expectError(error.InvalidType, compare(Value.null, Value.initInteger(0), .eq));
 }
 
 pub fn isFalsy(value: Value) bool {
-    return switch (value) {
+    return switch (value.kind()) {
         .null => true,
-        .bool => |b| !b,
+        .bool => !value.boolean(),
         else => false,
     };
 }
@@ -200,21 +196,21 @@ pub fn isTruthy(value: Value) bool {
 }
 
 test "isFalsy" {
-    try std.testing.expect(isFalsy(.null));
-    try std.testing.expect(isFalsy(.{ .bool = false }));
-    try std.testing.expect(!isFalsy(.{ .bool = true }));
-    try std.testing.expect(!isFalsy(.{ .integer = 0 }));
-    try std.testing.expect(!isFalsy(.{ .integer = 1 }));
-    try std.testing.expect(!isFalsy(.{ .string = "" }));
-    try std.testing.expect(!isFalsy(.{ .string = "hello" }));
+    try std.testing.expect(isFalsy(Value.null));
+    try std.testing.expect(isFalsy(Value.initBool(false)));
+    try std.testing.expect(!isFalsy(Value.initBool(true)));
+    try std.testing.expect(!isFalsy(Value.initInteger(0)));
+    try std.testing.expect(!isFalsy(Value.initInteger(1)));
+    try std.testing.expect(!isFalsy(Value.initString("")));
+    try std.testing.expect(!isFalsy(Value.initString("hello")));
 }
 
 test "isTruthy" {
-    try std.testing.expect(!isTruthy(.null));
-    try std.testing.expect(!isTruthy(.{ .bool = false }));
-    try std.testing.expect(isTruthy(.{ .bool = true }));
-    try std.testing.expect(isTruthy(.{ .integer = 0 }));
-    try std.testing.expect(isTruthy(.{ .integer = 1 }));
-    try std.testing.expect(isTruthy(.{ .string = "" }));
-    try std.testing.expect(isTruthy(.{ .string = "hello" }));
+    try std.testing.expect(!isTruthy(Value.null));
+    try std.testing.expect(!isTruthy(Value.initBool(false)));
+    try std.testing.expect(isTruthy(Value.initBool(true)));
+    try std.testing.expect(isTruthy(Value.initInteger(0)));
+    try std.testing.expect(isTruthy(Value.initInteger(1)));
+    try std.testing.expect(isTruthy(Value.initString("")));
+    try std.testing.expect(isTruthy(Value.initString("hello")));
 }

@@ -332,9 +332,9 @@ const Parser = struct {
                 _ = try self.tokens.next();
                 const i: i64 = @intFromFloat(f);
                 if (@as(f64, @floatFromInt(i)) == f) {
-                    try self.constants.append(self.allocator, .{ .integer = i });
+                    try self.constants.append(self.allocator, jv.Value.initInteger(i));
                 } else {
-                    try self.constants.append(self.allocator, .{ .float = f });
+                    try self.constants.append(self.allocator, jv.Value.initFloat(f));
                 }
                 const idx: ConstIndex = @enumFromInt(self.constants.items.len - 1);
                 const number_node = try self.compile_allocator.create(Ast);
@@ -343,7 +343,7 @@ const Parser = struct {
             },
             .string => |s| {
                 _ = try self.tokens.next();
-                try self.constants.append(self.allocator, .{ .string = try self.allocator.dupe(u8, s) });
+                try self.constants.append(self.allocator, jv.Value.initString(try self.allocator.dupe(u8, s)));
                 const idx: ConstIndex = @enumFromInt(self.constants.items.len - 1);
                 const string_node = try self.compile_allocator.create(Ast);
                 string_node.* = .{ .literal = idx };
@@ -372,7 +372,7 @@ const Parser = struct {
             .brace_left => {
                 _ = try self.tokens.next();
                 _ = try self.tokens.expect(.brace_right);
-                try self.constants.append(self.allocator, .{ .object = jv.Object.init(self.allocator) });
+                try self.constants.append(self.allocator, jv.Value.initObject(jv.Object.init(self.allocator)));
                 const idx: ConstIndex = @enumFromInt(self.constants.items.len - 1);
                 const object_node = try self.compile_allocator.create(Ast);
                 object_node.* = .{ .literal = idx };
@@ -383,7 +383,7 @@ const Parser = struct {
                 const is_optional = self.tokens.consumeIf(.question);
                 const base_ast = try self.compile_allocator.create(Ast);
                 base_ast.* = .identity;
-                try self.constants.append(self.allocator, .{ .string = try self.allocator.dupe(u8, name) });
+                try self.constants.append(self.allocator, jv.Value.initString(try self.allocator.dupe(u8, name)));
                 const idx: ConstIndex = @enumFromInt(self.constants.items.len - 1);
                 const key_ast = try self.compile_allocator.create(Ast);
                 key_ast.* = .{ .literal = idx };
