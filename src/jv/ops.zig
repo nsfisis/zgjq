@@ -5,6 +5,7 @@ const Object = @import("./value.zig").Object;
 
 pub const OpsError = error{
     InvalidType,
+    InternalError,
     Unimplemented,
 };
 
@@ -21,6 +22,61 @@ pub fn index(base: Value, key: Value) OpsError!Value {
         .null => Value.null,
         else => error.InvalidType,
     };
+}
+
+pub fn slice(allocator: std.mem.Allocator, base: Value, from: Value, to: Value) OpsError!Value {
+    switch (base) {
+        .array => |a| {
+            const len: i64 = @intCast(a.len());
+
+            var start: i64 = if (from == .null) 0 else if (from == .integer) from.integer else return error.InvalidType;
+            var end: i64 = if (to == .null) len else if (to == .integer) to.integer else return error.InvalidType;
+
+            if (start < 0) start += len;
+            if (end < 0) end += len;
+
+            start = @max(0, @min(start, len));
+            end = @max(0, @min(end, len));
+
+            if (start >= end) {
+                const empty = Array.init(allocator) catch return error.InternalError;
+                return Value.initArray(empty);
+            }
+
+            var result = Array.init(allocator) catch return error.InternalError;
+            const ustart: usize = @intCast(start);
+            const uend: usize = @intCast(end);
+            var i: usize = ustart;
+            while (i < uend) : (i += 1) {
+                result.append(allocator, a.get(i)) catch return error.InternalError;
+            }
+            return Value.initArray(result);
+        },
+        .string => |s| {
+            const len: i64 = @intCast(s.len);
+
+            var start: i64 = if (from == .null) 0 else if (from == .integer) from.integer else return error.InvalidType;
+            var end: i64 = if (to == .null) len else if (to == .integer) to.integer else return error.InvalidType;
+
+            if (start < 0) start += len;
+            if (end < 0) end += len;
+
+            start = @max(0, @min(start, len));
+            end = @max(0, @min(end, len));
+
+            if (start >= end) {
+                const duped = allocator.dupe(u8, "") catch return error.InternalError;
+                return Value.initString(duped);
+            }
+
+            const ustart: usize = @intCast(start);
+            const uend: usize = @intCast(end);
+            const duped = allocator.dupe(u8, s[ustart..uend]) catch return error.InternalError;
+            return Value.initString(duped);
+        },
+        .null => return .null,
+        else => return error.InvalidType,
+    }
 }
 
 pub const CompareOp = enum { eq, ne, lt, gt, le, ge };

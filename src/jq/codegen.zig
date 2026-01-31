@@ -19,6 +19,8 @@ pub const Opcode = enum {
     subexp_end,
     index,
     index_opt,
+    slice,
+    slice_opt,
     add,
     sub,
     mul,
@@ -52,6 +54,8 @@ pub const Instr = union(Opcode) {
     subexp_end,
     index,
     index_opt,
+    slice,
+    slice_opt,
     add,
     sub,
     mul,
@@ -96,6 +100,26 @@ const Codegen = struct {
                 try self.generate(idx.index);
                 try self.emit(.subexp_end);
                 try self.emit(if (idx.is_optional) .index_opt else .index);
+            },
+            .slice => |slice| {
+                try self.generate(slice.base);
+                // from
+                try self.emit(.subexp_begin);
+                if (slice.from) |from| {
+                    try self.generate(from);
+                } else {
+                    try self.emit(.{ .@"const" = .null });
+                }
+                try self.emit(.subexp_end);
+                // to
+                try self.emit(.subexp_begin);
+                if (slice.to) |to| {
+                    try self.generate(to);
+                } else {
+                    try self.emit(.{ .@"const" = .null });
+                }
+                try self.emit(.subexp_end);
+                try self.emit(if (slice.is_optional) .slice_opt else .slice);
             },
             .literal => |idx| try self.emit(.{ .@"const" = idx }),
             .binary_expr => |binary_expr| {

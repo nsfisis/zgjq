@@ -273,6 +273,30 @@ pub const Runtime = struct {
                     key.deinit(self.allocator);
                     try self.values.push(result);
                 },
+                .slice => {
+                    std.debug.assert(self.values.ensureSize(3));
+
+                    const base = self.values.pop();
+                    const to = self.values.pop();
+                    const from = self.values.pop();
+                    const result = try jv.ops.slice(self.allocator, base, from, to);
+                    base.deinit(self.allocator);
+                    to.deinit(self.allocator);
+                    from.deinit(self.allocator);
+                    try self.values.push(result);
+                },
+                .slice_opt => {
+                    std.debug.assert(self.values.ensureSize(3));
+
+                    const base = self.values.pop();
+                    const to = self.values.pop();
+                    const from = self.values.pop();
+                    const result = jv.ops.slice(self.allocator, base, from, to) catch jv.Value.null;
+                    base.deinit(self.allocator);
+                    to.deinit(self.allocator);
+                    from.deinit(self.allocator);
+                    try self.values.push(result);
+                },
                 .add => {
                     std.debug.assert(self.values.ensureSize(3));
 

@@ -12,6 +12,7 @@ pub const ParseError = error{
 pub const AstKind = enum {
     identity,
     index,
+    slice,
     literal,
     binary_expr,
     or_expr,
@@ -47,6 +48,7 @@ pub const BinaryOp = enum {
 pub const Ast = union(AstKind) {
     identity,
     index: struct { base: *Ast, index: *Ast, is_optional: bool },
+    slice: struct { base: *Ast, from: ?*Ast, to: ?*Ast, is_optional: bool },
     literal: ConstIndex,
     binary_expr: struct { op: BinaryOp, lhs: *Ast, rhs: *Ast },
     or_expr: struct { lhs: *Ast, rhs: *Ast },
@@ -397,13 +399,43 @@ const Parser = struct {
 
     fn parseSuffix(self: *Self, base: *Ast) Error!*Ast {
         _ = try self.tokens.expect(.bracket_left);
-        const index_expr = try self.parseExpr();
+
+        // Handle [:to] form.
+        if (self.tokens.consumeIf(.colon)) {
+            const to_expr = try self.parseQuery();
+            _ = try self.tokens.expect(.bracket_right);
+            const is_optional = self.tokens.consumeIf(.question);
+            const ast = try self.compile_allocator.create(Ast);
+            ast.* = .{ .slice = .{ .base = base, .from = null, .to = to_expr, .is_optional = is_optional } };
+            return ast;
+        }
+
+        const first_query = try self.parseQuery();
+
+        // Handle [from:to] or [from:] form.
+        if (self.tokens.consumeIf(.colon)) {
+            if (self.tokens.consumeIf(.bracket_right)) {
+                // [from:]
+                const is_optional = self.tokens.consumeIf(.question);
+                const ast = try self.compile_allocator.create(Ast);
+                ast.* = .{ .slice = .{ .base = base, .from = first_query, .to = null, .is_optional = is_optional } };
+                return ast;
+            } else {
+                // [from:to]
+                const to_expr = try self.parseQuery();
+                _ = try self.tokens.expect(.bracket_right);
+                const is_optional = self.tokens.consumeIf(.question);
+                const ast = try self.compile_allocator.create(Ast);
+                ast.* = .{ .slice = .{ .base = base, .from = first_query, .to = to_expr, .is_optional = is_optional } };
+                return ast;
+            }
+        }
+
+        // Handle [index] form.
         _ = try self.tokens.expect(.bracket_right);
-
         const is_optional = self.tokens.consumeIf(.question);
-
         const ast = try self.compile_allocator.create(Ast);
-        ast.* = .{ .index = .{ .base = base, .index = index_expr, .is_optional = is_optional } };
+        ast.* = .{ .index = .{ .base = base, .index = first_query, .is_optional = is_optional } };
         return ast;
     }
 };

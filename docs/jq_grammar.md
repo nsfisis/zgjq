@@ -89,6 +89,9 @@ term:
 
 suffix:
     '[' query ']' '?'?
+    '[' query ':' query ']' '?'?
+    '[' query ':' ']' '?'?
+    '[' ':' query ']' '?'?
 
 primary:
     'null'
