@@ -208,11 +208,11 @@ pub const Runtime = struct {
     pub fn next(self: *Self) !?jv.Value {
         std.debug.assert(self.instrs.len > 0);
 
-        _ = self.restore_stack();
+        var is_backtracking = self.restore_stack();
 
         while (self.pc < self.instrs.len) : (self.pc += 1) {
             const cur = self.instrs[self.pc];
-            // std.debug.print("{}\n", .{cur});
+            // std.debug.print("{}  ({})\n", .{ cur, self.values.stack.size() });
             switch (cur) {
                 .nop => {},
                 .ret => {
@@ -435,6 +435,32 @@ pub const Runtime = struct {
                     const var_ptr = &self.variables.items[@intFromEnum(idx)];
                     try var_ptr.arrayAppend(self.allocator, self.values.pop());
                 },
+                .each => {
+                    std.debug.assert(self.values.ensureSize(1));
+
+                    const key = if (is_backtracking)
+                        jv.Value.initInteger(self.values.pop().integer + 1)
+                    else
+                        jv.Value.initInteger(0);
+                    const base = self.values.pop();
+                    if (base.array.len() <= key.integer) {
+                        base.deinit(self.allocator);
+                        if (self.restore_stack()) {
+                            self.pc -= 1;
+                            is_backtracking = true;
+                            continue;
+                        } else {
+                            return null;
+                        }
+                    }
+                    const idx_result: jv.Value = try jv.ops.index(base, key);
+                    const result = idx_result.clone();
+                    try self.values.push(base);
+                    try self.values.push(key);
+                    try self.save_stack(self.pc);
+                    try self.values.push(result);
+                    is_backtracking = false;
+                },
             }
         }
 
@@ -442,12 +468,14 @@ pub const Runtime = struct {
     }
 
     fn save_stack(self: *Self, target_pc: usize) !void {
+        // std.debug.print("STACK SAVED: {}\n", .{target_pc});
         try self.forks.append(self.allocator, target_pc);
         try self.values.save();
     }
 
     fn restore_stack(self: *Self) bool {
         if (self.forks.pop()) |target_pc| {
+            // std.debug.print("STACK RESTORED: {}\n", .{target_pc});
             self.pc = target_pc;
             self.values.restore(self.allocator);
             return true;

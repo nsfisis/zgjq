@@ -392,3 +392,8 @@ test "array constructor" {
         \\]
     , "{\"a\":1,\"b\":2}", "[.a, [.a, [.a, .b]]]");
 }
+
+test "each" {
+    try testRunMultiple(&.{ "1", "2", "3" }, "[1,2,3]", ".[]");
+    try testRunMultiple(&.{ "1", "2", "3" }, "[[1],[2],[3]]", ".[] | .[]");
+}

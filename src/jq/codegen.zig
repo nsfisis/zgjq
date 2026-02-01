@@ -37,6 +37,7 @@ pub const Opcode = enum {
     load,
     store,
     append,
+    each,
 };
 
 pub const Instr = union(Opcode) {
@@ -72,6 +73,7 @@ pub const Instr = union(Opcode) {
     load: VariableIndex,
     store: VariableIndex,
     append: VariableIndex,
+    each,
 
     pub fn op(self: Self) Opcode {
         return self;
@@ -263,6 +265,12 @@ const Codegen = struct {
                 try self.emit(.{ .append = v });
                 try self.emit(.backtrack);
                 try self.emit(.{ .load = v });
+            },
+            .each => |each| {
+                // <base>
+                // EACH
+                try self.generate(each.base);
+                try self.emit(.each);
             },
         }
     }

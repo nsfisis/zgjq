@@ -88,6 +88,7 @@ term:
     primary { suffix }*
 
 suffix:
+    '[' ']'
     '[' query ']' '?'?
     '[' query ':' query ']' '?'?
     '[' query ':' ']' '?'?

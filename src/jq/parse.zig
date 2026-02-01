@@ -20,6 +20,7 @@ pub const AstKind = enum {
     pipe,
     comma,
     construct_array,
+    each,
 };
 
 pub const BinaryOp = enum {
@@ -56,6 +57,7 @@ pub const Ast = union(AstKind) {
     pipe: struct { lhs: *Ast, rhs: *Ast },
     comma: struct { lhs: *Ast, rhs: *Ast },
     construct_array: struct { items: *Ast },
+    each: struct { base: *Ast },
 
     pub fn kind(self: @This()) AstKind {
         return self;
@@ -399,6 +401,13 @@ const Parser = struct {
 
     fn parseSuffix(self: *Self, base: *Ast) Error!*Ast {
         _ = try self.tokens.expect(.bracket_left);
+
+        // Handle [] form.
+        if (self.tokens.consumeIf(.bracket_right)) {
+            const ast = try self.compile_allocator.create(Ast);
+            ast.* = .{ .each = .{ .base = base } };
+            return ast;
+        }
 
         // Handle [:to] form.
         if (self.tokens.consumeIf(.colon)) {
