@@ -4,6 +4,7 @@ const tokenize = @import("./tokenize.zig").tokenize;
 const parse = @import("./parse.zig").parse;
 const Instr = @import("./codegen.zig").Instr;
 const codegen = @import("./codegen.zig").codegen;
+const disasm = @import("./codegen.zig").disasm;
 
 pub const ExecuteError = error{
     Unimplemented,
@@ -189,16 +190,15 @@ pub const Runtime = struct {
         const ast = try parse(self.allocator, compile_allocator.allocator(), tokens, &self.constants);
         const instrs = try codegen(self.allocator, ast);
         self.instrs = instrs;
-        // std.debug.print("BEGIN\n", .{});
-        // for (self.instrs) |instr| {
-        //     std.debug.print("{}\n", .{instr});
-        // }
-        // std.debug.print("END\n", .{});
     }
 
     pub fn compileFromSlice(self: *Self, query: []const u8) !void {
         var reader = std.Io.Reader.fixed(query);
         return self.compileFromReader(&reader);
+    }
+
+    pub fn dumpDisasm(self: *const Self, writer: *std.Io.Writer) !void {
+        try disasm(self.allocator, self.instrs, self.constants.items, writer);
     }
 
     pub fn start(self: *Self, input: jv.Value) !void {

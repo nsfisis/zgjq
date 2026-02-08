@@ -44,6 +44,21 @@ fn testRunMultiple(expected: []const []const u8, input: []const u8, query: []con
     try std.testing.expectEqual(null, try runtime.next());
 }
 
+fn testDisasm(expected: []const u8, query: []const u8) !void {
+    const allocator = std.testing.allocator;
+
+    var runtime = try jq.Runtime.init(allocator);
+    defer runtime.deinit();
+    try runtime.compileFromSlice(query);
+
+    var buf: [4096]u8 = undefined;
+    var writer = std.Io.Writer.fixed(&buf);
+    try runtime.dumpDisasm(&writer);
+    try writer.flush();
+
+    try std.testing.expectEqualStrings(expected, buf[0..writer.end]);
+}
+
 test "literals" {
     try testRun("\"hello\"", "null", "\"hello\"");
     try testRun("\"\"", "null", "\"\"");
@@ -396,4 +411,121 @@ test "array constructor" {
 test "each" {
     try testRunMultiple(&.{ "1", "2", "3" }, "[1,2,3]", ".[]");
     try testRunMultiple(&.{ "1", "2", "3" }, "[[1],[2],[3]]", ".[] | .[]");
+}
+
+test "disasm identity" {
+    try testDisasm(
+        \\0000 NOP
+        \\0001 RET
+        \\
+    , ".");
+}
+
+test "disasm field access" {
+    try testDisasm(
+        \\0000 NOP
+        \\0001 SUBEXP_BEGIN
+        \\0002 CONST "foo"
+        \\0003 SUBEXP_END
+        \\0004 INDEX
+        \\0005 RET
+        \\
+    , ".foo");
+}
+
+test "disasm pipe and comma" {
+    try testDisasm(
+        \\0000 NOP
+        \\0001 SUBEXP_BEGIN
+        \\0002 CONST "foo"
+        \\0003 SUBEXP_END
+        \\0004 INDEX
+        \\0005 FORK 0012
+        \\0006 NOP
+        \\0007 SUBEXP_BEGIN
+        \\0008 CONST "bar"
+        \\0009 SUBEXP_END
+        \\0010 INDEX
+        \\0011 JUMP 0017
+        \\0012 NOP
+        \\0013 SUBEXP_BEGIN
+        \\0014 CONST "baz"
+        \\0015 SUBEXP_END
+        \\0016 INDEX
+        \\0017 RET
+        \\
+    , ".foo | .bar, .baz");
+}
+
+test "disasm array construction" {
+    try testDisasm(
+        \\0000 DUP
+        \\0001 CONST []
+        \\0002 STORE $0
+        \\0003 NOP
+        \\0004 EACH
+        \\0005 APPEND $0
+        \\0006 BACKTRACK
+        \\0007 LOAD $0
+        \\0008 RET
+        \\
+    , "[.[]]");
+}
+
+test "disasm arithmetic" {
+    try testDisasm(
+        \\0000 SUBEXP_BEGIN
+        \\0001 CONST 1
+        \\0002 SUBEXP_END
+        \\0003 SUBEXP_BEGIN
+        \\0004 NOP
+        \\0005 SUBEXP_END
+        \\0006 ADD
+        \\0007 RET
+        \\
+    , ". + 1");
+}
+
+test "disasm optional index" {
+    try testDisasm(
+        \\0000 NOP
+        \\0001 SUBEXP_BEGIN
+        \\0002 CONST "foo"
+        \\0003 SUBEXP_END
+        \\0004 INDEX_OPT
+        \\0005 RET
+        \\
+    , ".foo?");
+}
+
+test "disasm comparison" {
+    try testDisasm(
+        \\0000 SUBEXP_BEGIN
+        \\0001 CONST 1
+        \\0002 SUBEXP_END
+        \\0003 SUBEXP_BEGIN
+        \\0004 NOP
+        \\0005 SUBEXP_END
+        \\0006 EQ
+        \\0007 RET
+        \\
+    , ". == 1");
+}
+
+test "disasm constants" {
+    try testDisasm(
+        \\0000 CONST null
+        \\0001 RET
+        \\
+    , "null");
+    try testDisasm(
+        \\0000 CONST true
+        \\0001 RET
+        \\
+    , "true");
+    try testDisasm(
+        \\0000 CONST false
+        \\0001 RET
+        \\
+    , "false");
 }

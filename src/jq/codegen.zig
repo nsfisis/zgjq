@@ -38,6 +38,22 @@ pub const Opcode = enum {
     store,
     append,
     each,
+
+    pub fn name(self: Opcode) []const u8 {
+        switch (self) {
+            inline else => |tag| {
+                const tag_name = @tagName(tag);
+                const upper_tag_name = comptime blk: {
+                    var buf: [tag_name.len]u8 = undefined;
+                    for (tag_name, 0..) |c, i| {
+                        buf[i] = std.ascii.toUpper(c);
+                    }
+                    break :blk buf;
+                };
+                return &upper_tag_name;
+            },
+        }
+    }
 };
 
 pub const Instr = union(Opcode) {
@@ -303,4 +319,27 @@ pub fn codegen(allocator: std.mem.Allocator, ast: *const Ast) ![]Instr {
     try gen.generate(ast);
     try gen.emit(.ret);
     return gen.toOwnedSlice();
+}
+
+pub fn disasm(allocator: std.mem.Allocator, instrs: []const Instr, constants: []const jv.Value, writer: *std.Io.Writer) !void {
+    for (instrs, 0..) |instr, i| {
+        try writer.print("{d:0>4} ", .{i});
+        try writer.writeAll(instr.op().name());
+        switch (instr) {
+            // program address
+            .jump, .jump_unless, .fork => |offset| try writer.print(" {d:0>4}", .{i + offset}),
+            // constant index
+            .@"const" => |idx| {
+                try writer.writeAll(" ");
+                const k = try jv.stringify(allocator, constants[@intFromEnum(idx)]);
+                defer allocator.free(k);
+                try writer.writeAll(k);
+            },
+            // variable index
+            .load, .store, .append => |idx| try writer.print(" ${d}", .{@intFromEnum(idx)}),
+            // no arguments
+            else => {},
+        }
+        try writer.writeAll("\n");
+    }
 }

@@ -8,11 +8,20 @@ pub fn main() !void {
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
 
-    if (args.len < 2) {
-        try std.fs.File.stderr().writeAll("usage: zgjq <query>\n");
+    var debug_dump_disasm = false;
+    var query: ?[]const u8 = null;
+    for (args[1..]) |arg| {
+        if (std.mem.eql(u8, arg, "--debug-dump-disasm")) {
+            debug_dump_disasm = true;
+        } else if (query == null) {
+            query = arg;
+        }
+    }
+
+    if (query == null) {
+        try std.fs.File.stderr().writeAll("usage: zgjq [--debug-dump-disasm] <query>\n");
         std.process.exit(1);
     }
-    const query = args[1];
 
     const input = try std.fs.File.stdin().readToEndAlloc(allocator, std.math.maxInt(usize));
     defer allocator.free(input);
@@ -23,7 +32,15 @@ pub fn main() !void {
 
     var runtime = try jq.Runtime.init(allocator);
     defer runtime.deinit();
-    try runtime.compileFromSlice(query);
+    try runtime.compileFromSlice(query.?);
+
+    if (debug_dump_disasm) {
+        var buf: [4096]u8 = undefined;
+        var stderr = std.fs.File.stderr().writer(&buf);
+        try runtime.dumpDisasm(&stderr.interface);
+        try stderr.interface.flush();
+    }
+
     try runtime.start(json);
 
     const stdout = std.fs.File.stdout();
