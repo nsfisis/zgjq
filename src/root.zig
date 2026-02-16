@@ -529,3 +529,22 @@ test "disasm constants" {
         \\
     , "false");
 }
+
+test "parentheses" {
+    try testRun("123", "123", "(.)");
+    try testRun("null", "null", "(.)");
+
+    try testRun("9", "null", "(1 + 2) * 3");
+    try testRun("7", "null", "1 + 2 * 3");
+    try testRun("6", "null", "(1 + 2) | . * 2");
+    try testRun("12", "null", "((1 + 2)) * (3 + 1)");
+    try testRun("3", "{\"a\":1,\"b\":2}", "(.a + .b) | . + 0");
+    try testRunMultiple(&.{ "1", "2" }, "null", "(1, 2)");
+
+    try testRun(
+        \\[
+        \\  2,
+        \\  4
+        \\]
+    , "null", "[(1, 2) * 2]");
+}

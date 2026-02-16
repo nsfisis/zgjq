@@ -382,6 +382,12 @@ const Parser = struct {
                 object_node.* = .{ .literal = idx };
                 return object_node;
             },
+            .paren_left => {
+                _ = try self.tokens.next();
+                const inner = try self.parseQuery();
+                _ = try self.tokens.expect(.paren_right);
+                return inner;
+            },
             .field => |name| {
                 _ = try self.tokens.next();
                 const is_optional = self.tokens.consumeIf(.question);
