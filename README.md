@@ -9,7 +9,7 @@ Zig implementation of [jq](https://jqlang.org/).
 
 ### Requirements
 
-- zig 0.15.x
+- zig 0.16.x
 - [just](https://github.com/casey/just)
 
 ### Steps
