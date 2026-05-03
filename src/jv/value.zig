@@ -104,7 +104,7 @@ pub const Array = struct {
     rc: Rc(Inner),
 
     pub fn init(allocator: std.mem.Allocator) !Array {
-        return .{ .rc = try Rc(Inner).init(allocator, .{}) };
+        return .{ .rc = try Rc(Inner).init(allocator, .empty) };
     }
 
     pub fn clone(self: Array) Array {
@@ -141,7 +141,7 @@ pub const Array = struct {
     fn ensureUnique(self: *Array, allocator: std.mem.Allocator) !void {
         if (!self.rc.isUnique()) {
             const old_items = self.rc.get().items;
-            var new_inner: Inner = .{};
+            var new_inner: Inner = .empty;
             try new_inner.ensureTotalCapacity(allocator, old_items.len);
             for (old_items) |item| {
                 new_inner.appendAssumeCapacity(item.clone());

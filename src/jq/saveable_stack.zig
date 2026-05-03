@@ -67,9 +67,9 @@ pub fn SaveableStack(comptime T: type) type {
 
         pub fn init(allocator: std.mem.Allocator) !Self {
             var stack = Self{
-                .segments = .{},
+                .segments = .empty,
                 .active_segment_index = 0,
-                .savepoints = .{},
+                .savepoints = .empty,
                 .allocator = allocator,
             };
 

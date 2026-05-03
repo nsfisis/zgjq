@@ -156,11 +156,11 @@ pub const Runtime = struct {
         return .{
             .allocator = allocator,
             .values = try ValueStack.init(allocator),
-            .forks = .{},
+            .forks = .empty,
             .instrs = &[_]Instr{},
             .pc = 0,
             .constants = constants,
-            .variables = .{},
+            .variables = .empty,
         };
     }
 
