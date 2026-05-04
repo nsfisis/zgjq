@@ -71,6 +71,7 @@ pub const TokenKind = enum {
     keyword_try,
 
     identifier,
+    binding,
     number,
     string,
     format,
@@ -139,6 +140,7 @@ pub const Token = union(TokenKind) {
     keyword_try,
 
     identifier: []const u8,
+    binding: []const u8,
     number: f64,
     string: []const u8,
     format: []const u8,
@@ -494,7 +496,15 @@ pub fn tokenize(allocator: std.mem.Allocator, reader: *std.Io.Reader) ![]Token {
                 continue;
             },
             '"' => .{ .string = try tokenizeString(allocator, reader) },
-            '$' => .dollar,
+            '$' => blk: {
+                if (try peekByte(reader)) |c2| {
+                    if (isIdentifierStart(c2)) {
+                        reader.toss(1);
+                        break :blk Token{ .binding = try tokenizeIdentifier(allocator, reader, c2) };
+                    }
+                }
+                break :blk .dollar;
+            },
             '%' => if (try takeByteIf(reader, '=')) .percent_equal else .percent,
             '(' => .paren_left,
             ')' => .paren_right,
@@ -712,6 +722,63 @@ test "tokenize identifier in complex query" {
     try std.testing.expectEqualStrings("foo", tokens[0].field);
     try std.testing.expectEqual(.pipe, tokens[1]);
     try std.testing.expectEqualStrings("bar::baz", tokens[2].identifier);
+    try std.testing.expectEqual(.end, tokens[3]);
+}
+
+test "tokenize binding" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed("$foo $_bar $baz2 $__loc__");
+    const tokens = try tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectEqual(5, tokens.len);
+    try std.testing.expectEqualStrings("foo", tokens[0].binding);
+    try std.testing.expectEqualStrings("_bar", tokens[1].binding);
+    try std.testing.expectEqualStrings("baz2", tokens[2].binding);
+    try std.testing.expectEqualStrings("__loc__", tokens[3].binding);
+    try std.testing.expectEqual(.end, tokens[4]);
+}
+
+test "tokenize namespaced binding" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed("$foo::bar");
+    const tokens = try tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectEqual(2, tokens.len);
+    try std.testing.expectEqualStrings("foo::bar", tokens[0].binding);
+    try std.testing.expectEqual(.end, tokens[1]);
+}
+
+test "tokenize binding in expression" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed(".foo as $x | $x");
+    const tokens = try tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectEqual(6, tokens.len);
+    try std.testing.expectEqualStrings("foo", tokens[0].field);
+    try std.testing.expectEqual(.keyword_as, tokens[1]);
+    try std.testing.expectEqualStrings("x", tokens[2].binding);
+    try std.testing.expectEqual(.pipe, tokens[3]);
+    try std.testing.expectEqualStrings("x", tokens[4].binding);
+    try std.testing.expectEqual(.end, tokens[5]);
+}
+
+test "tokenize dollar without identifier" {
+    var allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer allocator.deinit();
+
+    var reader = std.Io.Reader.fixed("$ $.");
+    const tokens = try tokenize(allocator.allocator(), &reader);
+
+    try std.testing.expectEqual(4, tokens.len);
+    try std.testing.expectEqual(.dollar, tokens[0]);
+    try std.testing.expectEqual(.dollar, tokens[1]);
+    try std.testing.expectEqual(.dot, tokens[2]);
     try std.testing.expectEqual(.end, tokens[3]);
 }
 
