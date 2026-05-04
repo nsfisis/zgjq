@@ -47,6 +47,7 @@ pub fn main(init: std.process.Init) !void {
 
     const stdout = std.Io.File.stdout();
     while (try runtime.next()) |result| {
+        defer result.deinit(allocator);
         const output = try jv.stringify(allocator, result);
         defer allocator.free(output);
         try stdout.writeStreamingAll(init.io, output);
