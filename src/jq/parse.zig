@@ -10,6 +10,8 @@ pub const ParseError = error{
 };
 
 pub const AstKind = enum {
+    unimplemented, // TODO: remove it
+
     identity,
     index,
     slice,
@@ -47,6 +49,8 @@ pub const BinaryOp = enum {
 };
 
 pub const Ast = union(AstKind) {
+    unimplemented,
+
     identity,
     index: struct { base: *Ast, index: *Ast, is_optional: bool },
     slice: struct { base: *Ast, from: ?*Ast, to: ?*Ast, is_optional: bool },
@@ -122,22 +126,133 @@ const Parser = struct {
     tokens: *TokenStream,
     constants: *std.ArrayList(jv.Value),
 
+    fn unimplemented(self: *Self) Error!*Ast {
+        const ast = try self.compile_allocator.create(Ast);
+        ast.* = .unimplemented;
+        return ast;
+    }
+
     fn parseProgram(self: *Self) Error!*Ast {
-        const ret = try self.parseBody();
+        const module = try self.parseModuleOpt();
+        _ = module;
+        const imports = try self.parseImports();
+        _ = imports;
+        const body = try self.parseBody();
         _ = try self.tokens.expect(.end);
-        return ret;
+        return body;
+    }
+
+    fn parseModuleOpt(self: *Self) Error!*Ast {
+        if (self.tokens.consumeIf(.keyword_module)) {
+            const query = try self.parseQuery();
+            _ = query;
+            _ = try self.tokens.expect(.semicolon);
+        }
+        return self.unimplemented();
+    }
+
+    fn parseImports(self: *Self) Error!*Ast {
+        while (true) {
+            if (self.tokens.consumeIf(.keyword_import)) {
+                _ = try self.tokens.expect(.string);
+                _ = try self.tokens.expect(.keyword_as);
+                const tok = try self.tokens.next();
+                switch (tok.kind()) {
+                    .binding, .identifier => {},
+                    else => return error.InvalidQuery,
+                }
+                if (!self.tokens.consumeIf(.semicolon)) {
+                    _ = try self.parseQuery();
+                    _ = try self.tokens.expect(.semicolon);
+                }
+            } else if (self.tokens.consumeIf(.keyword_include)) {
+                _ = try self.tokens.expect(.string);
+                if (!self.tokens.consumeIf(.semicolon)) {
+                    _ = try self.parseQuery();
+                    _ = try self.tokens.expect(.semicolon);
+                }
+            } else {
+                break;
+            }
+        }
+        return self.unimplemented();
     }
 
     fn parseBody(self: *Self) Error!*Ast {
+        while (true) {
+            const tok = self.tokens.peek() catch break;
+            if (tok.kind() != .keyword_def) break;
+            _ = try self.parseFuncdef();
+        }
+        const tok = self.tokens.peek() catch return self.unimplemented();
+        if (tok.kind() == .end) {
+            return self.unimplemented();
+        }
         return self.parseQuery();
     }
 
-    fn parseQuery(self: *Self) Error!*Ast {
-        return self.parseQuery2();
+    fn parseFuncdef(self: *Self) Error!*Ast {
+        _ = try self.tokens.expect(.keyword_def);
+        _ = try self.tokens.expect(.identifier);
+        if (self.tokens.consumeIf(.paren_left)) {
+            _ = try self.parseParams();
+            _ = try self.tokens.expect(.paren_right);
+        }
+        _ = try self.tokens.expect(.colon);
+        _ = try self.parseQuery();
+        _ = try self.tokens.expect(.semicolon);
+        return self.unimplemented();
     }
 
-    fn parseQuery2(self: *Self) Error!*Ast {
-        var lhs = try self.parseQuery3();
+    fn parseParams(self: *Self) Error!*Ast {
+        _ = try self.parseParam();
+        while (self.tokens.consumeIf(.semicolon)) {
+            _ = try self.parseParam();
+        }
+        return self.unimplemented();
+    }
+
+    fn parseParam(self: *Self) Error!*Ast {
+        const tok = try self.tokens.next();
+        switch (tok.kind()) {
+            .binding, .identifier => {},
+            else => return error.InvalidQuery,
+        }
+        return self.unimplemented();
+    }
+
+    fn parseQuery(self: *Self) Error!*Ast {
+        while (true) {
+            const tok = self.tokens.peek() catch return error.UnexpectedEnd;
+            if (tok.kind() == .keyword_def) {
+                _ = try self.parseFuncdef();
+                continue;
+            }
+            if (tok.kind() == .keyword_label) {
+                _ = try self.tokens.next();
+                _ = try self.tokens.expect(.binding);
+                _ = try self.tokens.expect(.pipe);
+                _ = try self.parseQuery();
+                return self.unimplemented();
+            }
+            break;
+        }
+        var lhs = try self.parseExpr();
+        if (self.tokens.consumeIf(.keyword_as)) {
+            _ = try self.parsePatterns();
+            _ = try self.tokens.expect(.pipe);
+            _ = try self.parseQuery();
+            return self.unimplemented();
+        }
+        while (self.tokens.consumeIf(.comma)) {
+            const rhs = try self.parseExpr();
+            const ast = try self.compile_allocator.create(Ast);
+            ast.* = .{ .comma = .{
+                .lhs = lhs,
+                .rhs = rhs,
+            } };
+            lhs = ast;
+        }
         while (self.tokens.consumeIf(.pipe)) {
             const rhs = try self.parseQuery3();
             const ast = try self.compile_allocator.create(Ast);
@@ -302,10 +417,38 @@ const Parser = struct {
         var result = try self.parsePrimary();
         while (true) {
             const token = self.tokens.peek() catch return result;
-            if (token.kind() == .bracket_left) {
-                result = try self.parseSuffix(result);
-            } else {
-                break;
+            switch (token.kind()) {
+                .bracket_left => {
+                    result = try self.parseSuffix(result);
+                },
+                .field => {
+                    _ = try self.tokens.next();
+                    result = try self.unimplemented();
+                },
+                .dot => {
+                    _ = try self.tokens.next();
+                    const next_tok = try self.tokens.peek();
+                    switch (next_tok.kind()) {
+                        .string => {
+                            _ = try self.tokens.next();
+                            result = try self.unimplemented();
+                        },
+                        .bracket_left => {
+                            _ = try self.tokens.next();
+                            if (!self.tokens.consumeIf(.bracket_right)) {
+                                _ = try self.parseQuery();
+                                _ = try self.tokens.expect(.bracket_right);
+                            }
+                            result = try self.unimplemented();
+                        },
+                        else => return error.InvalidQuery,
+                    }
+                },
+                .question => {
+                    _ = try self.tokens.next();
+                    result = try self.unimplemented();
+                },
+                else => break,
             }
         }
         return result;
@@ -355,6 +498,12 @@ const Parser = struct {
             },
             .dot => {
                 _ = try self.tokens.next();
+                if (self.tokens.peek()) |next_tok| {
+                    if (next_tok.kind() == .string) {
+                        _ = try self.tokens.next();
+                        return self.unimplemented();
+                    }
+                } else |_| {}
                 const ast = try self.compile_allocator.create(Ast);
                 ast.* = .identity;
                 return ast;
@@ -375,12 +524,19 @@ const Parser = struct {
             },
             .brace_left => {
                 _ = try self.tokens.next();
+                if (self.tokens.consumeIf(.brace_right)) {
+                    try self.constants.append(self.allocator, jv.Value.initObject(try jv.Object.init(self.allocator)));
+                    const idx: ConstIndex = @enumFromInt(self.constants.items.len - 1);
+                    const object_node = try self.compile_allocator.create(Ast);
+                    object_node.* = .{ .literal = idx };
+                    return object_node;
+                }
+                _ = try self.parseDictPair();
+                while (self.tokens.consumeIf(.comma)) {
+                    _ = try self.parseDictPair();
+                }
                 _ = try self.tokens.expect(.brace_right);
-                try self.constants.append(self.allocator, jv.Value.initObject(try jv.Object.init(self.allocator)));
-                const idx: ConstIndex = @enumFromInt(self.constants.items.len - 1);
-                const object_node = try self.compile_allocator.create(Ast);
-                object_node.* = .{ .literal = idx };
-                return object_node;
+                return self.unimplemented();
             },
             .paren_left => {
                 _ = try self.tokens.next();
@@ -400,6 +556,79 @@ const Parser = struct {
                 const ast = try self.compile_allocator.create(Ast);
                 ast.* = .{ .index = .{ .base = base_ast, .index = key_ast, .is_optional = is_optional } };
                 return ast;
+            },
+            .dot_dot => {
+                _ = try self.tokens.next();
+                return self.unimplemented();
+            },
+            .minus => {
+                _ = try self.tokens.next();
+                _ = try self.parseTerm();
+                return self.unimplemented();
+            },
+            .format => {
+                _ = try self.tokens.next();
+                return self.unimplemented();
+            },
+            .binding => {
+                _ = try self.tokens.next();
+                return self.unimplemented();
+            },
+            .identifier => {
+                _ = try self.tokens.next();
+                if (self.tokens.consumeIf(.paren_left)) {
+                    _ = try self.parseArgs();
+                    _ = try self.tokens.expect(.paren_right);
+                }
+                return self.unimplemented();
+            },
+            .keyword_break => {
+                _ = try self.tokens.next();
+                _ = try self.tokens.expect(.binding);
+                return self.unimplemented();
+            },
+            .keyword_reduce => {
+                _ = try self.tokens.next();
+                _ = try self.parseExpr();
+                _ = try self.tokens.expect(.keyword_as);
+                _ = try self.parsePatterns();
+                _ = try self.tokens.expect(.paren_left);
+                _ = try self.parseQuery();
+                _ = try self.tokens.expect(.semicolon);
+                _ = try self.parseQuery();
+                _ = try self.tokens.expect(.paren_right);
+                return self.unimplemented();
+            },
+            .keyword_foreach => {
+                _ = try self.tokens.next();
+                _ = try self.parseExpr();
+                _ = try self.tokens.expect(.keyword_as);
+                _ = try self.parsePatterns();
+                _ = try self.tokens.expect(.paren_left);
+                _ = try self.parseQuery();
+                _ = try self.tokens.expect(.semicolon);
+                _ = try self.parseQuery();
+                if (self.tokens.consumeIf(.semicolon)) {
+                    _ = try self.parseQuery();
+                }
+                _ = try self.tokens.expect(.paren_right);
+                return self.unimplemented();
+            },
+            .keyword_if => {
+                _ = try self.tokens.next();
+                _ = try self.parseQuery();
+                _ = try self.tokens.expect(.keyword_then);
+                _ = try self.parseQuery();
+                _ = try self.parseElseBody();
+                return self.unimplemented();
+            },
+            .keyword_try => {
+                _ = try self.tokens.next();
+                _ = try self.parseExpr();
+                if (self.tokens.consumeIf(.keyword_catch)) {
+                    _ = try self.parseExpr();
+                }
+                return self.unimplemented();
             },
             else => return error.InvalidQuery,
         }
@@ -453,7 +682,168 @@ const Parser = struct {
         ast.* = .{ .index = .{ .base = base, .index = first_query, .is_optional = is_optional } };
         return ast;
     }
+
+    fn parseElseBody(self: *Self) Error!*Ast {
+        const tok = try self.tokens.next();
+        switch (tok.kind()) {
+            .keyword_elif => {
+                _ = try self.parseQuery();
+                _ = try self.tokens.expect(.keyword_then);
+                _ = try self.parseQuery();
+                _ = try self.parseElseBody();
+            },
+            .keyword_else => {
+                _ = try self.parseQuery();
+                _ = try self.tokens.expect(.keyword_end);
+            },
+            .keyword_end => {},
+            else => return error.InvalidQuery,
+        }
+        return self.unimplemented();
+    }
+
+    fn parseArgs(self: *Self) Error!*Ast {
+        _ = try self.parseQuery();
+        while (self.tokens.consumeIf(.semicolon)) {
+            _ = try self.parseQuery();
+        }
+        return self.unimplemented();
+    }
+
+    fn parsePatterns(self: *Self) Error!*Ast {
+        _ = try self.parsePattern();
+        while (self.tokens.consumeIf(.question_slash_slash)) {
+            _ = try self.parsePattern();
+        }
+        return self.unimplemented();
+    }
+
+    fn parsePattern(self: *Self) Error!*Ast {
+        const tok = try self.tokens.next();
+        switch (tok.kind()) {
+            .binding => {},
+            .bracket_left => {
+                _ = try self.parseArrayPatterns();
+                _ = try self.tokens.expect(.bracket_right);
+            },
+            .brace_left => {
+                _ = try self.parseObjPatterns();
+                _ = try self.tokens.expect(.brace_right);
+            },
+            else => return error.InvalidQuery,
+        }
+        return self.unimplemented();
+    }
+
+    fn parseArrayPatterns(self: *Self) Error!*Ast {
+        _ = try self.parsePattern();
+        while (self.tokens.consumeIf(.comma)) {
+            _ = try self.parsePattern();
+        }
+        return self.unimplemented();
+    }
+
+    fn parseObjPatterns(self: *Self) Error!*Ast {
+        _ = try self.parseObjPattern();
+        while (self.tokens.consumeIf(.comma)) {
+            _ = try self.parseObjPattern();
+        }
+        return self.unimplemented();
+    }
+
+    fn parseObjPattern(self: *Self) Error!*Ast {
+        const tok = try self.tokens.next();
+        switch (tok.kind()) {
+            .binding => {
+                if (self.tokens.consumeIf(.colon)) {
+                    _ = try self.parsePattern();
+                }
+            },
+            .identifier, .string => {
+                _ = try self.tokens.expect(.colon);
+                _ = try self.parsePattern();
+            },
+            .paren_left => {
+                _ = try self.parseQuery();
+                _ = try self.tokens.expect(.paren_right);
+                _ = try self.tokens.expect(.colon);
+                _ = try self.parsePattern();
+            },
+            else => {
+                if (isKeyword(tok.kind())) {
+                    _ = try self.tokens.expect(.colon);
+                    _ = try self.parsePattern();
+                } else {
+                    return error.InvalidQuery;
+                }
+            },
+        }
+        return self.unimplemented();
+    }
+
+    fn parseDictPair(self: *Self) Error!*Ast {
+        const tok = try self.tokens.next();
+        switch (tok.kind()) {
+            .identifier, .string, .binding => {
+                if (self.tokens.consumeIf(.colon)) {
+                    _ = try self.parseDictExpr();
+                }
+            },
+            .paren_left => {
+                _ = try self.parseQuery();
+                _ = try self.tokens.expect(.paren_right);
+                _ = try self.tokens.expect(.colon);
+                _ = try self.parseDictExpr();
+            },
+            else => {
+                if (isKeyword(tok.kind())) {
+                    if (self.tokens.consumeIf(.colon)) {
+                        _ = try self.parseDictExpr();
+                    }
+                } else {
+                    return error.InvalidQuery;
+                }
+            },
+        }
+        return self.unimplemented();
+    }
+
+    fn parseDictExpr(self: *Self) Error!*Ast {
+        _ = try self.parseExpr();
+        while (self.tokens.consumeIf(.pipe)) {
+            _ = try self.parseExpr();
+        }
+        return self.unimplemented();
+    }
 };
+
+fn isKeyword(kind: TokenKind) bool {
+    return switch (kind) {
+        .keyword_and,
+        .keyword_as,
+        .keyword_break,
+        .keyword_catch,
+        .keyword_def,
+        .keyword_elif,
+        .keyword_else,
+        .keyword_end,
+        .keyword_false,
+        .keyword_foreach,
+        .keyword_if,
+        .keyword_import,
+        .keyword_include,
+        .keyword_label,
+        .keyword_module,
+        .keyword_null,
+        .keyword_or,
+        .keyword_reduce,
+        .keyword_then,
+        .keyword_true,
+        .keyword_try,
+        => true,
+        else => false,
+    };
+}
 
 pub fn parse(allocator: std.mem.Allocator, compile_allocator: std.mem.Allocator, tokens: []const Token, constants: *std.ArrayList(jv.Value)) !*Ast {
     var token_stream = TokenStream.init(tokens);

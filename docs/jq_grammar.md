@@ -25,12 +25,41 @@
 
 ```
 program:
-    body
+    module? imports body
+
+module:
+    'module' query ';'                              # parse only
+
+imports:
+    { import }*
+
+import:
+    'import' STRING 'as' BINDING query? ';'         # parse only
+    'import' STRING 'as' IDENT query? ';'           # parse only
+    'include' STRING query? ';'                     # parse only
 
 body:
+    funcdefs
     query
 
+funcdefs:
+    { funcdef }+                                    # parse only
+
+funcdef:
+    'def' IDENT ':' query ';'                       # parse only
+    'def' IDENT '(' params ')' ':' query ';'        # parse only
+
+params:
+    { param | ';' }+
+
+param:
+    BINDING
+    IDENT
+
 query:
+    funcdef query                                   # parse only
+    expr 'as' patterns '|' query                    # parse only
+    'label' BINDING '|' query                       # parse only
     query2
 
 query2:
@@ -85,27 +114,92 @@ expr7:
     term
 
 term:
-    primary { suffix }*
-
-suffix:
-    '[' ']'
-    '[' query ']' '?'?
-    '[' query ':' query ']' '?'?
-    '[' query ':' ']' '?'?
-    '[' ':' query ']' '?'?
-
-primary:
+    '.'
+    '..'                                            # parse only
+    'break' BINDING                                 # parse only
+    term FIELD                                      # parse only
+    FIELD '?'?
+    term '.' STRING                                 # parse only
+    '.' STRING                                      # parse only
+    term '[' query ']' '?'?
+    term '.' '[' query ']'                          # parse only
+    term '[' ']'
+    term '.' '[' ']'                                # parse only
+    term '[' query ':' query ']' '?'?
+    term '[' query ':' ']' '?'?
+    term '[' ':' query ']' '?'?
+    term '?'                                        # parse only
     'null'
     'true'
     'false'
     NUMBER
     STRING
-    '.'
-    FIELD '?'?
+    FORMAT                                          # parse only
+    '-' term                                        # parse only
+    '(' query ')'
+    '[' query ']'
     '[' ']'
     '{' '}'
-    '[' query ']'
-    '(' query ')'
+    '{' dict-pairs '}'                              # parse only
+    'reduce' expr 'as' patterns '(' query ';' query ')'
+                                                    # parse only
+    'foreach' expr 'as' patterns '(' query ';' query ';' query ')'
+                                                    # parse only
+    'foreach' expr 'as' patterns '(' query ';' query ')'
+                                                    # parse only
+    'if' query 'then' query else-body               # parse only
+    'try' expr 'catch' expr                         # parse only
+    'try' expr                                      # parse only
+    BINDING                                         # parse only
+    IDENT                                           # parse only
+    IDENT '(' args ')'                              # parse only
+
+else-body:
+    'elif' query 'then' query else-body
+    'else' query 'end'
+    'end'
+
+args:
+    { query | ';' }+
+
+patterns:
+    { pattern | '?//' }+
+
+pattern:
+    BINDING
+    '[' array-patterns ']'
+    '{' obj-patterns '}'
+
+array-patterns:
+    { pattern | ',' }+
+
+obj-patterns:
+    { obj-pattern | ',' }+
+
+obj-pattern:
+    BINDING
+    BINDING ':' pattern
+    IDENT ':' pattern
+    KEYWORD ':' pattern
+    STRING ':' pattern
+    '(' query ')' ':' pattern
+
+dict-pairs:
+    { dict-pair | ',' }+
+
+dict-pair:
+    IDENT ':' dict-expr
+    KEYWORD ':' dict-expr
+    STRING ':' dict-expr
+    STRING
+    BINDING ':' dict-expr
+    BINDING
+    IDENT
+    KEYWORD
+    '(' query ')' ':' dict-expr
+
+dict-expr:
+    { expr | '|' }+
 ```
 
 
@@ -119,7 +213,7 @@ module:
     'module' query ';'
 
 imports:
-    { import }+
+    { import }*
 
 import:
     'import' STRING 'as' BINDING query? ';'

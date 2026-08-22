@@ -111,6 +111,8 @@ const Codegen = struct {
 
     fn generate(self: *Codegen, ast: *const Ast) !void {
         switch (ast.*) {
+            .unimplemented => return error.Unimplemented,
+
             .identity => try self.emit(.nop),
             .index => |idx| {
                 try self.generate(idx.base);
