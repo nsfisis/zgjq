@@ -274,7 +274,7 @@ const Codegen = struct {
                 // APPEND v
                 // BACKTRACK
                 // LOAD v
-                const v: VariableIndex = @enumFromInt(self.variables_count);
+                const v: VariableIndex = @fromBackingInt(@intCast(self.variables_count));
                 self.variables_count += 1;
                 try self.emit(.dup);
                 try self.emit(.{ .@"const" = .empty_array });
@@ -333,12 +333,12 @@ pub fn disasm(allocator: std.mem.Allocator, instrs: []const Instr, constants: []
             // constant index
             .@"const" => |idx| {
                 try writer.writeAll(" ");
-                const k = try jv.stringify(allocator, constants[@intFromEnum(idx)]);
+                const k = try jv.stringify(allocator, constants[@backingInt(idx)]);
                 defer allocator.free(k);
                 try writer.writeAll(k);
             },
             // variable index
-            .load, .store, .append => |idx| try writer.print(" ${d}", .{@intFromEnum(idx)}),
+            .load, .store, .append => |idx| try writer.print(" ${d}", .{@backingInt(idx)}),
             // no arguments
             else => {},
         }

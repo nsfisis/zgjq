@@ -414,25 +414,25 @@ pub const Runtime = struct {
                     std.debug.assert(self.values.ensureSize(1));
 
                     self.values.pop().deinit(self.allocator);
-                    try self.values.push(self.constants.items[@intFromEnum(idx)].clone());
+                    try self.values.push(self.constants.items[@backingInt(idx)].clone());
                 },
                 .load => |idx| {
-                    try self.values.push(self.variables.items[@intFromEnum(idx)].clone());
+                    try self.values.push(self.variables.items[@backingInt(idx)].clone());
                 },
                 .store => |idx| {
                     std.debug.assert(self.values.ensureSize(1));
 
                     // TODO: Allocate all local variables at startup.
-                    while (self.variables.items.len <= @intFromEnum(idx)) {
+                    while (self.variables.items.len <= @backingInt(idx)) {
                         try self.variables.append(self.allocator, jv.Value.null);
                     }
-                    self.variables.items[@intFromEnum(idx)].deinit(self.allocator);
-                    self.variables.items[@intFromEnum(idx)] = self.values.pop();
+                    self.variables.items[@backingInt(idx)].deinit(self.allocator);
+                    self.variables.items[@backingInt(idx)] = self.values.pop();
                 },
                 .append => |idx| {
                     std.debug.assert(self.values.ensureSize(1));
 
-                    const var_ptr = &self.variables.items[@intFromEnum(idx)];
+                    const var_ptr = &self.variables.items[@backingInt(idx)];
                     try var_ptr.arrayAppend(self.allocator, self.values.pop());
                 },
                 .each => {

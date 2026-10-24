@@ -483,7 +483,7 @@ const Parser = struct {
                 } else {
                     try self.constants.append(self.allocator, jv.Value.initFloat(f));
                 }
-                const idx: ConstIndex = @enumFromInt(self.constants.items.len - 1);
+                const idx: ConstIndex = @fromBackingInt(@intCast(self.constants.items.len - 1));
                 const number_node = try self.compile_allocator.create(Ast);
                 number_node.* = .{ .literal = idx };
                 return number_node;
@@ -491,7 +491,7 @@ const Parser = struct {
             .string => |s| {
                 _ = try self.tokens.next();
                 try self.constants.append(self.allocator, jv.Value.initString(try self.allocator.dupe(u8, s)));
-                const idx: ConstIndex = @enumFromInt(self.constants.items.len - 1);
+                const idx: ConstIndex = @fromBackingInt(@intCast(self.constants.items.len - 1));
                 const string_node = try self.compile_allocator.create(Ast);
                 string_node.* = .{ .literal = idx };
                 return string_node;
@@ -526,7 +526,7 @@ const Parser = struct {
                 _ = try self.tokens.next();
                 if (self.tokens.consumeIf(.brace_right)) {
                     try self.constants.append(self.allocator, jv.Value.initObject(try jv.Object.init(self.allocator)));
-                    const idx: ConstIndex = @enumFromInt(self.constants.items.len - 1);
+                    const idx: ConstIndex = @fromBackingInt(@intCast(self.constants.items.len - 1));
                     const object_node = try self.compile_allocator.create(Ast);
                     object_node.* = .{ .literal = idx };
                     return object_node;
@@ -550,7 +550,7 @@ const Parser = struct {
                 const base_ast = try self.compile_allocator.create(Ast);
                 base_ast.* = .identity;
                 try self.constants.append(self.allocator, jv.Value.initString(try self.allocator.dupe(u8, name)));
-                const idx: ConstIndex = @enumFromInt(self.constants.items.len - 1);
+                const idx: ConstIndex = @fromBackingInt(@intCast(self.constants.items.len - 1));
                 const key_ast = try self.compile_allocator.create(Ast);
                 key_ast.* = .{ .literal = idx };
                 const ast = try self.compile_allocator.create(Ast);
